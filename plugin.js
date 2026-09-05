@@ -14,12 +14,77 @@
  *   - insertCtx is captured fresh on every menu-row click (run), so the dialog
  *     always inserts through a closure from the current composer render.
  */
-import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Textarea, atom, host, useValue } from '@hermes/plugin-sdk'
+import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useRef, useState } from 'react'
 
 const STORAGE_KEY = 'snippets-v1'
 const DIALOG_MAX_W = 'max-w-md'
+const ID = 'prompt-snippets'
+
+// ── i18n locale bundles（跟随 app 语言；解析链 当前 locale → en → 键名）──────
+const LOCALES = {
+  en: {
+    menu: { label: 'My Snippets' },
+    manage: {
+      title: 'My Snippets',
+      desc: 'Click a snippet to insert it. Buttons on the right: edit / move up / move down / delete.',
+      add: 'Add', done: 'Done', empty: 'No snippets yet — click "Add" below to create one',
+      editTitle: 'Edit Snippet', addTitle: 'New Snippet',
+      formDesc: 'Label and content are required.',
+      fieldLabel: 'Label *', fieldLabelPh: 'e.g. Code review',
+      fieldDesc: 'Description (optional)', fieldDescPh: 'One line about what it is for',
+      fieldText: 'Content *', fieldTextPh: 'The full prompt inserted into the composer…',
+      cancel: 'Cancel', save: 'Save'
+    },
+    quick: {
+      filterPh: 'Type to filter, ↑↓ to move, ↵ to insert, Esc to close',
+      empty: 'No matching snippets'
+    },
+    row: { edit: 'Edit', up: 'Move up', down: 'Move down', del: 'Delete' },
+    notify: { insertFailed: 'Insert failed: composer unavailable', corrupted: 'Snippet data corrupted — reset to empty' }
+  },
+  zh: {
+    menu: { label: '我的片段' },
+    manage: {
+      title: '我的片段',
+      desc: '点选片段插入输入框；右侧按钮依次是编辑 / 上移 / 下移 / 删除。',
+      add: '新增', done: '完成', empty: '还没有片段，点下方「新增」加一条',
+      editTitle: '编辑片段', addTitle: '新增片段',
+      formDesc: '名称和内容必填。',
+      fieldLabel: '名称 *', fieldLabelPh: '如：代码审查',
+      fieldDesc: '描述（可选）', fieldDescPh: '一句话说明用途',
+      fieldText: '内容 *', fieldTextPh: '点选后插入输入框的完整提示词…',
+      cancel: '取消', save: '保存'
+    },
+    quick: {
+      filterPh: '输入过滤，↑↓ 选择，↵ 插入，Esc 关闭',
+      empty: '没有匹配的片段'
+    },
+    row: { edit: '编辑', up: '上移', down: '下移', del: '删除' },
+    notify: { insertFailed: '插入失败：输入框不可用', corrupted: '片段数据损坏，已重置为空' }
+  },
+  'zh-hant': {
+    menu: { label: '我的片段' },
+    manage: {
+      title: '我的片段',
+      desc: '點選片段插入輸入框；右側按鈕依次是編輯 / 上移 / 下移 / 刪除。',
+      add: '新增', done: '完成', empty: '還沒有片段，點下方「新增」加一條',
+      editTitle: '編輯片段', addTitle: '新增片段',
+      formDesc: '名稱和內容必填。',
+      fieldLabel: '名稱 *', fieldLabelPh: '如：代碼審查',
+      fieldDesc: '描述（可選）', fieldDescPh: '一句話說明用途',
+      fieldText: '內容 *', fieldTextPh: '點選後插入輸入框的完整提示詞…',
+      cancel: '取消', save: '儲存'
+    },
+    quick: {
+      filterPh: '輸入過濾，↑↓ 選擇，↵ 插入，Esc 關閉',
+      empty: '沒有符合的片段'
+    },
+    row: { edit: '編輯', up: '上移', down: '下移', del: '刪除' },
+    notify: { insertFailed: '插入失敗：輸入框不可用', corrupted: '片段資料損壞，已重設為空' }
+  }
+}
 
 // MessageSquareText lead icon — the official snippet dialog's row icon.
 // Exact tabler IconMessage2 paths (lib/icons.ts:75 maps MessageSquareText to
@@ -121,11 +186,18 @@ function firstVisibleSurface() {
   return visible ? visible.getAttribute('data-composer-target') : 'main'
 }
 
+// Module-level i18n fallback: loadSnippets runs outside React (no hook
+// access). ctx.i18n.t is captured at register time; before that, zh text.
+let ti18nStatic = null
+function notifyCorrupted() {
+  host.notify({ kind: 'error', message: ti18nStatic ? ti18nStatic('notify.corrupted') : '片段数据损坏，已重置为空' })
+}
+
 function loadSnippets() {
   if (!store) return []
   const raw = store.get(STORAGE_KEY, [])
   if (!Array.isArray(raw)) {
-    host.notify({ kind: 'error', message: '片段数据损坏，已重置为空' })
+    notifyCorrupted()
     store.set(STORAGE_KEY, [])
     return []
   }
@@ -231,7 +303,7 @@ const actionsWrapStyle = {
 
 const actionsWrapHoverStyle = { opacity: 1 }
 
-function SnippetRow({ snippet, idx, total, dispatch }) {
+function SnippetRow({ snippet, idx, total, dispatch, t }) {
   const [hover, setHover] = useState(false)
   return jsxs('div', {
     style: { ...rowStyle, ...(hover ? rowHoverStyle : null) },
@@ -259,51 +331,51 @@ function SnippetRow({ snippet, idx, total, dispatch }) {
       jsx('span', {
         style: { ...actionsWrapStyle, ...(hover ? actionsWrapHoverStyle : null) },
         children: [
-          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: '编辑', onClick: () => dispatch({ type: 'edit', id: snippet.id }), children: '✎' }),
-          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: '上移', onClick: () => dispatch({ type: 'move', id: snippet.id, dir: -1 }), disabled: idx === 0, children: '↑' }),
-          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: '下移', onClick: () => dispatch({ type: 'move', id: snippet.id, dir: 1 }), disabled: idx === total - 1, children: '↓' }),
-          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: '删除', onClick: () => dispatch({ type: 'delete', id: snippet.id }), children: '✕' })
+          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.edit'), onClick: () => dispatch({ type: 'edit', id: snippet.id }), children: '✎' }),
+          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.up'), onClick: () => dispatch({ type: 'move', id: snippet.id, dir: -1 }), disabled: idx === 0, children: '↑' }),
+          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.down'), onClick: () => dispatch({ type: 'move', id: snippet.id, dir: 1 }), disabled: idx === total - 1, children: '↓' }),
+          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.del'), onClick: () => dispatch({ type: 'delete', id: snippet.id }), children: '✕' })
         ]
       })
     ]
   })
 }
 
-function SnippetForm({ draft, onDraft }) {
+function SnippetForm({ draft, onDraft, t }) {
   return jsxs('div', {
     style: { display: 'grid', gap: '10px', paddingTop: '4px' },
     children: [
       jsx('div', {
         style: { display: 'grid', gap: '4px' },
         children: [
-          jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: '名称 *' }),
+          jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: t('manage.fieldLabel') }),
           jsx(Input, {
             value: draft.label,
             onChange: e => onDraft({ ...draft, label: e.target.value }),
-            placeholder: '如：代码审查'
+            placeholder: t('manage.fieldLabelPh')
           })
         ]
       }),
       jsx('div', {
         style: { display: 'grid', gap: '4px' },
         children: [
-          jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: '描述（可选）' }),
+          jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: t('manage.fieldDesc') }),
           jsx(Input, {
             value: draft.description,
             onChange: e => onDraft({ ...draft, description: e.target.value }),
-            placeholder: '一句话说明用途'
+            placeholder: t('manage.fieldDescPh')
           })
         ]
       }),
       jsx('div', {
         style: { display: 'grid', gap: '4px' },
         children: [
-          jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: '内容 *' }),
+          jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: t('manage.fieldText') }),
           jsx(Textarea, {
             value: draft.text,
             rows: 6,
             onChange: e => onDraft({ ...draft, text: e.target.value }),
-            placeholder: '点选后插入输入框的完整提示词…'
+            placeholder: t('manage.fieldTextPh')
           })
         ]
       })
@@ -359,7 +431,7 @@ function filterSnippets(list, query) {
   )
 }
 
-function QuickPicker({ snippets, onPick }) {
+function QuickPicker({ snippets, onPick, t }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const filtered = filterSnippets(snippets, query)
@@ -396,7 +468,7 @@ function QuickPicker({ snippets, onPick }) {
               setQuery(e.target.value)
               setActive(0)
             },
-            placeholder: filtered.length === 0 ? '没有匹配的片段' : '输入过滤，↑↓ 选择，↵ 插入，Esc 关闭',
+            placeholder: t('quick.filterPh'),
             style: { boxShadow: 'none', border: 'none', padding: '0', background: 'transparent' },
             autoFocus: true
           })
@@ -408,7 +480,7 @@ function QuickPicker({ snippets, onPick }) {
           filtered.length === 0
             ? jsx('div', {
                 style: { padding: '14px 0', textAlign: 'center', fontSize: '13px', opacity: 0.55 },
-                children: '没有匹配的片段'
+                children: t('quick.empty')
               })
             : filtered.map((sn, i) =>
                 jsx(
@@ -439,6 +511,7 @@ function QuickPicker({ snippets, onPick }) {
 function ManagerDialog() {
   const open = useValue($managerOpen)
   const mode = useValue($mode)
+  const t = usePluginI18n(ID)
   const [list, setList] = useState([])
   const [editing, setEditing] = useState(null)
   const [wasOpen, setWasOpen] = useState(false)
@@ -560,7 +633,7 @@ function ManagerDialog() {
       if (sn && insertIntoComposer(sn.text)) {
         return
       }
-      host.notify({ kind: 'error', message: '插入失败：输入框不可用' })
+      host.notify({ kind: 'error', message: t('notify.insertFailed') })
       return
     }
     if (action.type === 'edit') {
@@ -616,17 +689,18 @@ function ManagerDialog() {
               snippets: list,
               onPick: sn => {
                 if (!insertIntoComposer(sn.text)) {
-                  host.notify({ kind: 'error', message: '插入失败：输入框不可用' })
+                  host.notify({ kind: 'error', message: t('notify.insertFailed') })
                 }
-              }
+              },
+              t
             })
         : editing === null
           ? jsxs('div', {
               children: [
                 jsxs(DialogHeader, {
                   children: [
-                    jsx(DialogTitle, { children: '我的片段' }),
-                    jsx(DialogDescription, { children: '点选片段插入输入框；右侧按钮依次是编辑 / 上移 / 下移 / 删除。' })
+                    jsx(DialogTitle, { children: t('manage.title') }),
+                    jsx(DialogDescription, { children: t('manage.desc') })
                   ]
                 }),
                 jsx('div', {
@@ -635,9 +709,9 @@ function ManagerDialog() {
                     list.length === 0
                       ? jsx('div', {
                           style: { padding: '12px 0', textAlign: 'center', fontSize: '13px', opacity: 0.6 },
-                          children: '还没有片段，点下方「新增」加一条'
+                          children: t('manage.empty')
                         })
-                      : list.map((sn, i) => jsx(SnippetRow, { snippet: sn, idx: i, total: list.length, dispatch }, sn.id))
+                      : list.map((sn, i) => jsx(SnippetRow, { snippet: sn, idx: i, total: list.length, dispatch, t }, sn.id))
                 }),
                 jsxs(DialogFooter, {
                   style: { marginTop: '8px' },
@@ -646,9 +720,9 @@ function ManagerDialog() {
                       variant: 'outline',
                       size: 'sm',
                       onClick: () => setEditing({ id: null, label: '', description: '', text: '' }),
-                      children: '新增'
+                      children: t('manage.add')
                     }),
-                    jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => $managerOpen.set(false), children: '完成' })
+                    jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => $managerOpen.set(false), children: t('manage.done') })
                   ]
                 })
               ]
@@ -657,15 +731,15 @@ function ManagerDialog() {
               children: [
                 jsxs(DialogHeader, {
                   children: [
-                    jsx(DialogTitle, { children: editing.id ? '编辑片段' : '新增片段' }),
-                    jsx(DialogDescription, { children: '名称和内容必填。' })
+                    jsx(DialogTitle, { children: editing.id ? t('manage.editTitle') : t('manage.addTitle') }),
+                    jsx(DialogDescription, { children: t('manage.formDesc') })
                   ]
                 }),
-                jsx(SnippetForm, { draft: editing, onDraft: setEditing }),
+                jsx(SnippetForm, { draft: editing, onDraft: setEditing, t }),
                 jsxs(DialogFooter, {
                   children: [
-                    jsx(Button, { variant: 'outline', size: 'sm', onClick: () => setEditing(null), children: '取消' }),
-                    jsx(Button, { size: 'sm', onClick: saveDraft, disabled: !draftValid, children: '保存' })
+                    jsx(Button, { variant: 'outline', size: 'sm', onClick: () => setEditing(null), children: t('manage.cancel') }),
+                    jsx(Button, { size: 'sm', onClick: saveDraft, disabled: !draftValid, children: t('manage.save') })
                   ]
                 })
               ]
@@ -682,12 +756,20 @@ export default {
     store = ctx.storage
     ensureFocusTracker()
 
+    // Plugin i18n: register locale bundles (follows the app language); removed
+    // with the disposer on unload. ti18n = non-reactive translator for
+    // register-time strings (menu rows / palette / keybind labels evaluate
+    // once here — a locale switch shows on next reload, same as hub).
+    const disposeI18n = ctx.i18n.register(LOCALES)
+    const ti18n = ctx.i18n.t
+    ti18nStatic = ti18n
+
     // The "+" menu row — data contribution through the stable attachments seam.
     ctx.register({
       id: 'my-snippets-menu-row',
       area: COMPOSER_AREAS.attachments,
       data: {
-        label: '我的片段',
+        label: ti18n('menu.label'),
         icon: 'wand',
         run: insertCtx => {
           insertCtxRef = insertCtx
@@ -711,7 +793,7 @@ export default {
       area: PALETTE_AREA,
       data: {
         id: 'prompt-snippets.openManager',
-        label: '打开我的片段',
+        label: ti18n('menu.label'),
         keywords: ['snippet', '片段', '提示词', 'prompt'],
         run: () => {
           openSurface = captureSurface() || firstVisibleSurface()
@@ -732,7 +814,7 @@ export default {
         id: 'prompt-snippets.openManager',
         category: 'composer',
         defaults: [],
-        label: '打开我的片段',
+        label: ti18n('menu.label'),
         run: () => {
           openSurface = captureSurface() || firstVisibleSurface()
           $mode.set('quick')
@@ -745,6 +827,7 @@ export default {
       ctx.onDispose(() => {
         store = null
         insertCtxRef = null
+        if (typeof disposeI18n === 'function') disposeI18n()
         openSurface = null
         $managerOpen.set(false)
         $mode.set('manage')
