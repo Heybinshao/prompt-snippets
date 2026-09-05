@@ -18,6 +18,18 @@ Hermes Agent 桌面端插件：把你自己常用的提示词存成片段，一�
 
 ## 安装
 
+### 方式一：让 Hermes 帮你装（推荐）
+
+把下面这段话直接发给 Hermes：
+
+```
+帮我安装这个桌面插件：https://github.com/Heybinshao/prompt-snippets
+```
+
+Hermes 会自动下载 `plugin.js` 放到正确位置（`~/.hermes/desktop-plugins/prompt-snippets/`）并完成加载。
+
+### 方式二：手动安装
+
 1. 确认安装了 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 桌面端
 2. 下载 `plugin.js`，放到 `~/.hermes/desktop-plugins/prompt-snippets/plugin.js`（目录不存在就创建）
 3. 桌面端每 5 秒扫描该目录，落盘即自动加载（也可 ⌘K → **Reload desktop plugins**）
