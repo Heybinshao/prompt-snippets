@@ -759,26 +759,68 @@ export default {
     // Plugin i18n: register locale bundles (follows the app language); removed
     // with the disposer on unload. ti18n = non-reactive translator for
     // register-time strings (menu rows / palette / keybind labels evaluate
-    // once here — a locale switch shows on next reload, same as hub).
+    // once here).
     const disposeI18n = ctx.i18n.register(LOCALES)
     const ti18n = ctx.i18n.t
     ti18nStatic = ti18n
 
-    // The "+" menu row — data contribution through the stable attachments seam.
-    ctx.register({
-      id: 'my-snippets-menu-row',
-      area: COMPOSER_AREAS.attachments,
-      data: {
-        label: ti18n('menu.label'),
-        icon: 'wand',
-        run: insertCtx => {
-          insertCtxRef = insertCtx
-          openSurface = captureSurface() || firstVisibleSurface()
-          $mode.set('manage')
-          $managerOpen.set(true)
+    // Register-time-string contributions as a factory: called fresh on every
+    // (re)registration so labels re-evaluate against the CURRENT locale.
+    // Mirrors hub's statusbarData() pattern.
+    const registerStaticContributions = () => {
+      // The "+" menu row — data contribution through the stable attachments seam.
+      ctx.register({
+        id: 'my-snippets-menu-row',
+        area: COMPOSER_AREAS.attachments,
+        data: {
+          label: ti18n('menu.label'),
+          icon: 'wand',
+          run: insertCtx => {
+            insertCtxRef = insertCtx
+            openSurface = captureSurface() || firstVisibleSurface()
+            $mode.set('manage')
+            $managerOpen.set(true)
+          }
         }
-      }
-    })
+      })
+
+      // ⌘K palette row — quick open without the + menu hop.
+      ctx.register({
+        id: 'open-my-snippets',
+        area: PALETTE_AREA,
+        data: {
+          id: 'prompt-snippets.openManager',
+          label: ti18n('menu.label'),
+          keywords: ['snippet', '片段', '提示词', 'prompt'],
+          run: () => {
+            openSurface = captureSurface() || firstVisibleSurface()
+            $mode.set('manage')
+            $managerOpen.set(true)
+          }
+        }
+      })
+
+      // Global keybind (Settings → 键盘快捷键 can rebind it). Default unbound —
+      // binding is one panel click, and a default combo risks colliding with
+      // core composer keys. The palette row surfaces the live combo as its hint.
+      // Opens the Cmd-K-style quick picker: filter + ↑↓ + ↵ insert.
+      ctx.register({
+        id: 'my-snippets-keybind',
+        area: KEYBINDS_AREA,
+        data: {
+          id: 'prompt-snippets.openManager',
+          category: 'composer',
+          defaults: [],
+          label: ti18n('menu.label'),
+          run: () => {
+            openSurface = captureSurface() || firstVisibleSurface()
+            $mode.set('quick')
+            $managerOpen.set(true)
+          }
+        }
+      })
+    }
+    registerStaticContributions()
 
     // Dialog host — underside renders nothing visible when closed (null).
     ctx.register({
@@ -787,44 +829,24 @@ export default {
       render: () => jsx(ManagerDialog, {})
     })
 
-    // ⌘K palette row — quick open without the + menu hop.
-    ctx.register({
-      id: 'open-my-snippets',
-      area: PALETTE_AREA,
-      data: {
-        id: 'prompt-snippets.openManager',
-        label: ti18n('menu.label'),
-        keywords: ['snippet', '片段', '提示词', 'prompt'],
-        run: () => {
-          openSurface = captureSurface() || firstVisibleSurface()
-          $mode.set('manage')
-          $managerOpen.set(true)
-        }
-      }
+    // Locale live-switch: register-time strings (menu row / palette / keybind
+    // labels) evaluate ONCE, so a language change would leave them stale.
+    // Official I18nProvider writes document.documentElement.lang on every
+    // setLocale — watch it and re-register via the factory (registry replaces
+    // same-id entries atomically). Also fires on the cold-start window when
+    // the configured locale lands after plugin registration.
+    let lastLang = document.documentElement.lang
+    const langObserver = new MutationObserver(() => {
+      const lang = document.documentElement.lang
+      if (!lang || lang === lastLang) return
+      lastLang = lang
+      registerStaticContributions()
     })
-
-    // Global keybind (Settings → 键盘快捷键 can rebind it). Default unbound —
-    // binding is one panel click, and a default combo risks colliding with
-    // core composer keys. The palette row surfaces the live combo as its hint.
-    // Opens the Cmd-K-style quick picker: filter + ↑↓ + ↵ insert.
-    ctx.register({
-      id: 'my-snippets-keybind',
-      area: KEYBINDS_AREA,
-      data: {
-        id: 'prompt-snippets.openManager',
-        category: 'composer',
-        defaults: [],
-        label: ti18n('menu.label'),
-        run: () => {
-          openSurface = captureSurface() || firstVisibleSurface()
-          $mode.set('quick')
-          $managerOpen.set(true)
-        }
-      }
-    })
+    langObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] })
 
     if (typeof ctx.onDispose === 'function') {
       ctx.onDispose(() => {
+        langObserver.disconnect()
         store = null
         insertCtxRef = null
         if (typeof disposeI18n === 'function') disposeI18n()
