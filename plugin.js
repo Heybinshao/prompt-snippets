@@ -186,6 +186,56 @@ function firstVisibleSurface() {
   return visible ? visible.getAttribute('data-composer-target') : 'main'
 }
 
+// ── Keybind backup (2026-09-05) ────────────────────────────────────────────
+// The official keybind store persists ONLY bindings whose action is currently
+// registered (persistBindings iterates allKeybindActions). Contributed actions
+// register late (plugin scan), and any $bindings write before that rewrites
+// the store WITHOUT our override — the user's binding is wiped on every
+// restart/update. Defense: mirror the combo into plugin storage, restore it
+// into BOTH the official store (localStorage) and the contributed
+// contribution's defaults on every register. bindingsFor falls back to
+// defaults, so dispatch + the settings panel both resolve.
+const KEYBIND_OFFICIAL_KEY = 'hermes.desktop.keybinds'
+const KEYBIND_BACKUP_KEY = 'keybind-backup-v1'
+const KEYBIND_ACTION_ID = 'prompt-snippets.openManager'
+let keybindBackup = null
+
+function readOfficialKeybindMap() {
+  try {
+    const raw = localStorage.getItem(KEYBIND_OFFICIAL_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+// Backup: official store still has the user's combo → mirror it. Restore: the
+// official store lost it but we hold a backup → write it back so the next
+// full reload of the app's store picks it up.
+function syncKeybindBackup() {
+  if (!store) return
+  const official = readOfficialKeybindMap()
+  const officialCombo = official ? official[KEYBIND_ACTION_ID] : undefined
+
+  if (Array.isArray(officialCombo) && officialCombo.length > 0) {
+    keybindBackup = officialCombo
+    store.set(KEYBIND_BACKUP_KEY, officialCombo)
+    return
+  }
+
+  const backup = store.get(KEYBIND_BACKUP_KEY, null)
+  if (Array.isArray(backup) && backup.length > 0) {
+    keybindBackup = backup
+    try {
+      const map = readOfficialKeybindMap() || {}
+      map[KEYBIND_ACTION_ID] = backup
+      localStorage.setItem(KEYBIND_OFFICIAL_KEY, JSON.stringify(map))
+    } catch {}
+  }
+}
+
 // Module-level i18n fallback: loadSnippets runs outside React (no hook
 // access). ctx.i18n.t is captured at register time; before that, zh text.
 let ti18nStatic = null
@@ -768,6 +818,10 @@ export default {
     // (re)registration so labels re-evaluate against the CURRENT locale.
     // Mirrors hub's statusbarData() pattern.
     const registerStaticContributions = () => {
+      // Refresh the keybind backup on every pass — the official store can
+      // change (user rebinds) or get wiped (startup writes before our
+      // registration) between calls.
+      syncKeybindBackup()
       // The "+" menu row — data contribution through the stable attachments seam.
       ctx.register({
         id: 'my-snippets-menu-row',
@@ -804,13 +858,16 @@ export default {
       // binding is one panel click, and a default combo risks colliding with
       // core composer keys. The palette row surfaces the live combo as its hint.
       // Opens the Cmd-K-style quick picker: filter + ↑↓ + ↵ insert.
+      // defaults: served from the plugin-storage backup (see syncKeybindBackup)
+      // so bindingsFor still resolves the user's combo even after the official
+      // keybind store wipes contributed overrides on startup.
       ctx.register({
         id: 'my-snippets-keybind',
         area: KEYBINDS_AREA,
         data: {
           id: 'prompt-snippets.openManager',
           category: 'composer',
-          defaults: [],
+          defaults: [...(keybindBackup || [])],
           label: ti18n('menu.label'),
           run: () => {
             openSurface = captureSurface() || firstVisibleSurface()

@@ -1,4 +1,4 @@
-# Prompt Snippets — Hermes 桌面端自定义提示词片段 ![版本](https://img.shields.io/badge/版本-v1.1.1-blue)
+# Prompt Snippets — Hermes 桌面端自定义提示词片段 ![版本](https://img.shields.io/badge/版本-v1.2.0-blue)
 
 Hermes Agent 桌面端插件：把你自己常用的提示词存成片段，一键插入聊天输入框。
 
