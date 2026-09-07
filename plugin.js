@@ -666,8 +666,10 @@ const quickDescStyle = {
 // same geometry, same skin, events bound to the nodes that receive them.
 
 function surfaceComposerEl(surface) {
+  // `data-composer-target` hangs on the ChatView ROOT div — an ANCESTOR of
+  // composer-root (chat/index.tsx:654). Descend, don't climb.
   const host = document.querySelector(`[data-composer-target="${surface}"]`)
-  return host ? host.closest('[data-slot="composer-root"]') : null
+  return host ? host.querySelector('[data-slot="composer-root"]') : null
 }
 
 function surfaceEditorEl(surface) {
