@@ -658,132 +658,232 @@ const quickDescStyle = {
   color: 'var(--ui-text-tertiary)'
 }
 
-function filterSnippets(list, query) {
-  const q = query.trim().toLowerCase()
-  if (!q) return list
-  return list.filter(
-    s => s.label.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q)
+// ── Quick picker: native DOM layer hosted INSIDE composer-root ────────────
+// The official `/` drawer is an absolute child of ComposerPrimitive.Root and
+// anchors with plain CSS (bottom-full left-2 mb-1 w-80). Contrib slots render
+// OUTSIDE that root, and a React-owned node re-parented there breaks keyboard
+// handling + unmount — so this layer is built and torn down in plain DOM:
+// same geometry, same skin, events bound to the nodes that receive them.
+
+function surfaceComposerEl(surface) {
+  const host = document.querySelector(`[data-composer-target="${surface}"]`)
+  return host ? host.closest('[data-slot="composer-root"]') : null
+}
+
+function surfaceEditorEl(surface) {
+  const host = document.querySelector(`[data-composer-target="${surface}"]`)
+  if (!host) return null
+  return (
+    host.querySelector('[data-slot="composer-input"]') ||
+    host.querySelector('.ProseMirror[contenteditable="true"]') ||
+    host.querySelector('[contenteditable="true"]')
   )
 }
 
-function InlinePicker({ snippets, onPick, onClose, t, composerEl }) {
-  const [query, setQuery] = useState('')
-  const [active, setActive] = useState(0)
-  const [layerEl, setLayerEl] = useState(null)
-  const filtered = filterSnippets(snippets, query)
+// Standalone insert (no React scope): bus first, then the captured "+"-menu
+// ctx, then a direct splice into THIS surface's editor.
+function insertTextIntoSurface(surface, text) {
+  try {
+    window.dispatchEvent(
+      new CustomEvent('hermes:composer-insert', {
+        detail: { mode: 'block', target: surface, text }
+      })
+    )
+    return true
+  } catch {
+    // Fall through to legacy paths.
+  }
+  if (insertCtxRef && typeof insertCtxRef.insertText === 'function') {
+    try {
+      insertCtxRef.insertText(text)
+      return true
+    } catch {
+      // Stale closure after a reload — fall through.
+    }
+  }
+  const editor = surfaceEditorEl(surface)
+  if (editor) {
+    const current = editor.innerText || ''
+    const sep = current && !current.endsWith('\n') ? '\n' : ''
+    editor.textContent = `${current}${sep}${text}`
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
+    const sel = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    sel.removeAllRanges()
+    sel.addRange(range)
+    editor.focus()
+    return true
+  }
+  return false
+}
 
-  // Clamp active row when the filtered list shrinks.
-  if (active >= filtered.length && filtered.length > 0) {
-    setActive(0)
+let quickLayerClose = null // set while a quick layer is open; onDispose uses it
+
+function openQuickLayer({ composerEl, surface, filterPh, emptyLabel, insertFailedLabel }) {
+  if (quickLayerClose) quickLayerClose()
+  if (!composerEl) return false
+  const snippets = loadSnippets()
+  if (snippets.length === 0) {
+    // Nothing to pick — fall to the manage view so the user can create.
+    $mode.set('manage')
+    $managerOpen.set(true)
+    return true
   }
 
-  // Dialog-parity dismissal (the inline layer has no Radix auto-close):
-  // Escape anywhere in the window + pointerdown outside the layer both close.
-  useEffect(() => {
-    if (!layerEl) return undefined
+  let query = ''
+  let active = 0
+  const view = () =>
+    snippets.filter(
+      s =>
+        s.label.toLowerCase().includes(query) ||
+        (s.description || '').toLowerCase().includes(query)
+    )
 
-    function isInside(target) {
-      return target && layerEl.contains(target)
+  const el = (tag, style) => {
+    const n = document.createElement(tag)
+    if (style) Object.assign(n.style, style)
+    return n
+  }
+  const iconSpan = () => {
+    const s = el('span', quickIconStyle)
+    s.setAttribute('aria-hidden', 'true')
+    s.innerHTML = MESSAGE_SQUARE_SVG
+    return s
+  }
+
+  const shell = el('div', inlineShellStyle)
+  shell.setAttribute('data-prompt-snippets-layer', '')
+
+  const filterRow = el('div', quickInputRowStyle)
+  filterRow.appendChild(iconSpan())
+  const input = el('input', {
+    flex: '1 1 0%',
+    minWidth: '0px',
+    font: 'inherit',
+    color: 'inherit',
+    background: 'transparent',
+    border: 'none',
+    outline: 'none',
+    padding: '0px'
+  })
+  input.placeholder = filterPh
+  input.spellcheck = false
+  filterRow.appendChild(input)
+  shell.appendChild(filterRow)
+
+  const listEl = el('div', quickListStyle)
+  shell.appendChild(listEl)
+
+  function renderRows() {
+    listEl.textContent = ''
+    const items = view()
+    if (items.length === 0) {
+      const d = el('div', { padding: '14px 0px', textAlign: 'center', fontSize: '13px', opacity: '0.55' })
+      d.textContent = emptyLabel
+      listEl.appendChild(d)
+      return
     }
+    if (active >= items.length) active = 0
+    items.forEach((sn, i) => {
+      const btn = el('button', { ...quickRowStyle, ...(i === active ? quickRowActiveStyle : null) })
+      btn.type = 'button'
+      btn.appendChild(iconSpan())
+      const name = el('span', quickNameStyle)
+      name.textContent = sn.label
+      btn.appendChild(name)
+      if (sn.description) {
+        const desc = el('span', quickDescStyle)
+        desc.textContent = sn.description
+        btn.appendChild(desc)
+      }
+      btn.addEventListener('click', () => pick(sn))
+      btn.addEventListener('mousemove', () => {
+        if (active !== i) {
+          active = i
+          renderRows()
+        }
+      })
+      listEl.appendChild(btn)
+    })
+  }
 
-    function onGlobalKeyDown(e) {
-      if (e.key !== 'Escape') return
+  function scrollActive() {
+    const node = listEl.children[active]
+    if (node && node.scrollIntoView) node.scrollIntoView({ block: 'nearest' })
+  }
+
+  function close({ refocus = true } = {}) {
+    quickLayerClose = null
+    document.removeEventListener('keydown', onDocKey, true)
+    document.removeEventListener('pointerdown', onDocPointer, true)
+    shell.remove()
+    // The filter input stole focus from the composer; hand it back so the
+    // user keeps typing where the insert is about to land.
+    if (refocus) {
+      const ed = surfaceEditorEl(surface)
+      if (ed) ed.focus()
+    }
+  }
+
+  function pick(sn) {
+    close({ refocus: false })
+    if (!insertTextIntoSurface(surface, sn.text)) {
+      host.notify({ kind: 'error', message: insertFailedLabel })
+    }
+  }
+
+  function onDocKey(e) {
+    if (e.key === 'Escape') {
       e.preventDefault()
       e.stopPropagation()
-      onClose()
-    }
-
-    function onGlobalPointerDown(e) {
-      if (!isInside(e.target)) onClose()
-    }
-
-    window.addEventListener('keydown', onGlobalKeyDown, true)
-    window.addEventListener('pointerdown', onGlobalPointerDown, true)
-    return () => {
-      window.removeEventListener('keydown', onGlobalKeyDown, true)
-      window.removeEventListener('pointerdown', onGlobalPointerDown, true)
-    }
-  }, [layerEl, onClose])
-
-  function onKeyDown(e) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setActive(i => Math.min(i + 1, filtered.length - 1))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setActive(i => Math.max(i - 1, 0))
-    } else if (e.key === 'Enter') {
-      e.preventDefault()
-      const sn = filtered[active]
-      if (sn) onPick(sn)
+      close()
     }
   }
+  function onDocPointer(e) {
+    if (!shell.contains(e.target)) close()
+  }
 
-  // Official `/` drawer positioning = CSS only: the drawer is a child of
-  // ComposerPrimitive.Root and anchors with absolute bottom-full left-2 mb-1.
-  // Plugin slots render OUTSIDE that root, so after mount we MOVE this layer
-  // into the instance's own composer-root — same parent, same anchor, zero
-  // measurement. React reparents nothing on pure re-render (the node is only
-  // moved once per mount); on unmount React removes it from wherever it
-  // lives, which works because we appended the very node React owns.
-  useEffect(() => {
-    if (!layerEl || !composerEl) return
-    if (layerEl.parentElement !== composerEl) {
-      composerEl.appendChild(layerEl)
+  input.addEventListener('keydown', e => {
+    if (e.isComposing) return // IME confirm (Chinese input) is not a pick
+    const items = view()
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (items.length) {
+        active = Math.min(active + 1, items.length - 1)
+        renderRows()
+        scrollActive()
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (items.length) {
+        active = Math.max(active - 1, 0)
+        renderRows()
+        scrollActive()
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const sn = view()[active]
+      if (sn) pick(sn)
     }
-  }, [layerEl, composerEl])
-
-  return jsxs('div', {
-    ref: setLayerEl,
-    style: inlineShellStyle,
-    onKeyDown,
-    children: [
-      jsxs('div', {
-        style: quickInputRowStyle,
-        children: [
-          jsx('span', { style: quickIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }),
-          jsx(Input, {
-            value: query,
-            onChange: e => {
-              setQuery(e.target.value)
-              setActive(0)
-            },
-            placeholder: t('quick.filterPh'),
-            style: { boxShadow: 'none', border: 'none', padding: '0', background: 'transparent' },
-            autoFocus: true
-          })
-        ]
-      }),
-      jsx('div', {
-        style: quickListStyle,
-        children:
-          filtered.length === 0
-            ? jsx('div', {
-                style: { padding: '14px 0', textAlign: 'center', fontSize: '13px', opacity: 0.55 },
-                children: t('quick.empty')
-              })
-            : filtered.map((sn, i) =>
-                jsx(
-                  'button',
-                  {
-                    type: 'button',
-                    key: sn.id,
-                    onClick: () => onPick(sn),
-                    onMouseEnter: () => setActive(i),
-                    style: { ...quickRowStyle, ...(i === active ? quickRowActiveStyle : null) },
-                    children: [
-                      jsx('span', { style: quickIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }),
-                      jsx('span', { style: quickNameStyle, children: sn.label }),
-                      sn.description
-                        ? jsx('span', { style: quickDescStyle, children: sn.description })
-                        : null
-                    ]
-                  },
-                )
-              )
-      })
-    ]
   })
+  input.addEventListener('input', () => {
+    query = input.value.trim().toLowerCase()
+    active = 0
+    renderRows()
+  })
+
+  // Capture-phase doc listeners: Escape closes from anywhere, a click outside
+  // the layer closes (Radix Dialog parity).
+  document.addEventListener('keydown', onDocKey, true)
+  document.addEventListener('pointerdown', onDocPointer, true)
+  quickLayerClose = close
+
+  composerEl.appendChild(shell)
+  renderRows()
+  requestAnimationFrame(() => input.focus())
+  return true
 }
 
 function ManagerDialog() {
@@ -823,24 +923,9 @@ function ManagerDialog() {
     setWasOpen(false)
   }
 
-  // Quick mode with zero snippets: nothing to pick — fall through to the
-  // manager view so the user can create their first one. ONLY after the open
-  // reload has landed (loadedRef): on the very first render after opening,
-  // the local `list` is still the stale pre-open value ([]) while setList
-  // above has already queued the real data — converting here would flip
-  // mode to 'manage' and the FIRST keybind invocation would show the manager
-  // instead of the picker (second invocation worked because the previous
-  // open had populated `list`).
-  const loadedRef = useRef(false)
-  if (open && !loadedRef.current && wasOpen) {
-    loadedRef.current = true
-  }
-  if (!open) {
-    loadedRef.current = false
-  }
-  if (open && mode === 'quick' && loadedRef.current && list.length === 0) {
-    $mode.set('manage')
-  }
+  // (Quick mode with zero snippets is handled inside openQuickLayer — the
+  // keybind flips to manage before any Dialog mounts. The React subtree only
+  // ever renders manage.)
 
   // Only the instance whose surface matches the one captured at open time
   // shows a dialog. Fallback chain keeps the dialog VISIBLE even when the
@@ -955,34 +1040,15 @@ function ManagerDialog() {
   // the strip collapses only when its slot renders nothing, and a bare div
   // with no box (display:contents contributes no layout) keeps it collapsed.
   //
-  // quick mode renders an INLINE layer (absolute, composer's top edge) — same
-  // geometry as the official `/` completion drawer — instead of a centered
-  // Dialog. It must sit OUTSIDE the Dialog wrapper: the layer positions
-  // against the composer dock, not the (body-portaled) dialog.
-  const closePicker = () => $managerOpen.set(false)
-  // This instance's own composer: the nearest [data-slot="composer-root"]
-  // ABOVE the probe in the DOM tree. The probe lives in this session's
-  // composer dock, so this is always the right composer — a global
-  // querySelector would grab whichever composer renders first (wrong one
-  // when sessions are split/hidden).
-  const ownComposer = hostEl ? hostEl.closest('[data-slot="composer-root"]') : null
+  // quick mode does NOT render React: the keybind run() builds a native DOM
+  // layer inside the surface's composer-root directly (openQuickLayer). A
+  // React-owned node re-parented there broke keyboard handling + unmount.
+  // The React subtree only renders the manage Dialog.
   return jsx('div', {
     ref: setHostEl,
     style: { position: 'absolute', inset: '0px', pointerEvents: 'none' },
     children:
-      shouldShow && mode === 'quick' && editing === null
-        ? jsx(InlinePicker, {
-            snippets: list,
-            composerEl: ownComposer,
-            onPick: sn => {
-              if (!insertIntoComposer(sn.text)) {
-                host.notify({ kind: 'error', message: t('notify.insertFailed') })
-              }
-            },
-            onClose: closePicker,
-            t
-          })
-      : shouldShow
+      shouldShow
       ? jsx(Dialog, {
     open: true,
     onOpenChange: o => {
@@ -1117,9 +1183,24 @@ export default {
           defaults: [...(keybindBackup || [])],
           label: ti18n('menu.label'),
           run: () => {
-            openSurface = captureSurface() || firstVisibleSurface()
-            $mode.set('quick')
-            $managerOpen.set(true)
+            // Native quick layer, built directly into the focused surface's
+            // composer-root (no React state hop — a React-owned node moved
+            // there lost keyboard handling and crashed unmount).
+            const surface = captureSurface() || firstVisibleSurface()
+            openSurface = surface
+            if (surface && surfaceComposerEl(surface)) {
+              const ti = ti18nStatic
+              openQuickLayer({
+                composerEl: surfaceComposerEl(surface),
+                surface,
+                filterPh: ti('quick.filterPh'),
+                emptyLabel: ti('quick.empty'),
+                insertFailedLabel: ti('notify.insertFailed')
+              })
+            } else {
+              $mode.set('quick')
+              $managerOpen.set(true)
+            }
           }
         }
       })
@@ -1159,6 +1240,7 @@ export default {
         insertCtxRef = null
         if (typeof disposeI18n === 'function') disposeI18n()
         openSurface = null
+        if (quickLayerClose) quickLayerClose({ refocus: false }) // native quick layer teardown
         $managerOpen.set(false)
         $mode.set('manage')
         if (typeof window !== 'undefined') {
