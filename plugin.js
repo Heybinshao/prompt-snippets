@@ -16,7 +16,7 @@
  */
 import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const STORAGE_KEY = 'snippets-v1'
 const DIALOG_MAX_W = 'max-w-md'
@@ -28,7 +28,7 @@ const LOCALES = {
     menu: { label: 'My Snippets' },
     manage: {
       title: 'My Snippets',
-      desc: 'Click a snippet to insert it. Drag the ⠿ handle to reorder; buttons on the right: edit / delete.',
+      desc: 'Click a snippet to insert it. Drag the ⠿ handle on the right to reorder; buttons on the right: edit / delete.',
       add: 'Add', done: 'Done', empty: 'No snippets yet — click "Add" below to create one',
       editTitle: 'Edit Snippet', addTitle: 'New Snippet',
       formDesc: 'Label and content are required.',
@@ -48,7 +48,7 @@ const LOCALES = {
     menu: { label: '我的片段' },
     manage: {
       title: '我的片段',
-      desc: '点选片段插入输入框；拖动行首 ⠿ 排序，右侧按钮是编辑 / 删除。',
+      desc: '点选片段插入输入框；拖动右侧 ⠿ 排序，右侧按钮是编辑 / 删除。',
       add: '新增', done: '完成', empty: '还没有片段，点下方「新增」加一条',
       editTitle: '编辑片段', addTitle: '新增片段',
       formDesc: '名称和内容必填。',
@@ -68,7 +68,7 @@ const LOCALES = {
     menu: { label: '我的片段' },
     manage: {
       title: '我的片段',
-      desc: '點選片段插入輸入框；拖動行首 ⠿ 排序，右側按鈕是編輯 / 刪除。',
+      desc: '點選片段插入輸入框；拖動右側 ⠿ 排序，右側按鈕是編輯 / 刪除。',
       add: '新增', done: '完成', empty: '還沒有片段，點下方「新增」加一條',
       editTitle: '編輯片段', addTitle: '新增片段',
       formDesc: '名稱和內容必填。',
@@ -211,6 +211,12 @@ const KEYBIND_OFFICIAL_KEY = 'hermes.desktop.keybinds'
 const KEYBIND_BACKUP_KEY = 'keybind-backup-v1'
 const KEYBIND_ACTION_ID = 'prompt-snippets.openManager'
 let keybindBackup = null
+// Live-reorder drag state: the id of the row currently being dragged. Set on
+// dragStart, consumed by every row's dragover, cleared on dragEnd.
+const $dragFromId = atom(null)
+// Hover-preview target during a drag (atom — rows re-render on change).
+// Transform-based preview renders here; the real reorder commits on drop.
+const $dragOverId = atom(null)
 
 function readOfficialKeybindMap() {
   try {
@@ -375,36 +381,39 @@ const dragHandleStyle = {
   userSelect: 'none'
 }
 
-function SnippetRow({ snippet, idx, total, dispatch, t }) {
+function SnippetRow({ snippet, list, dispatch, t }) {
   const [hover, setHover] = useState(false)
-  const [dragging, setDragging] = useState(false)
+  const [pointerDragging, setPointerDragging] = useState(false)
+  const rowRef = useRef(null)
+  // Transform preview (dnd-kit pattern): while dragging, the dragged row
+  // follows the pointer (transform set imperatively in onPointerMove) and the
+  // rows between origin and the current slot slide by one row height. No list
+  // mutation until release — zero flicker.
+  const fromId = useValue($dragFromId)
+  const overId = useValue($dragOverId)
+  const isDragging = fromId === snippet.id
+  const fromIdx = fromId ? list.findIndex(s => s.id === fromId) : -1
+  const overIdx = overId ? list.findIndex(s => s.id === overId) : -1
+  const myIdx = list.findIndex(s => s.id === snippet.id)
+  let shift = 0
+  if (fromIdx >= 0 && overIdx >= 0 && myIdx >= 0 && !isDragging) {
+    if (fromIdx < overIdx && myIdx > fromIdx && myIdx <= overIdx) shift = -1
+    else if (fromIdx > overIdx && myIdx >= overIdx && myIdx < fromIdx) shift = 1
+  }
   return jsxs('div', {
+    ref: rowRef,
     style: {
       ...rowStyle,
       ...(hover ? rowHoverStyle : null),
-      ...(dragging ? { opacity: 0.4 } : null)
+      ...(isDragging && pointerDragging
+        ? { opacity: 0.85, boxShadow: '0 8px 24px rgba(0,0,0,0.25)', zIndex: 10, position: 'relative' }
+        : null),
+      transform: shift && !pointerDragging ? `translateY(${shift * 100}%)` : undefined,
+      transition: 'transform 150ms ease'
     },
     onMouseEnter: () => setHover(true),
     onMouseLeave: () => setHover(false),
-    onDragOver: e => e.preventDefault(),
-    onDrop: e => {
-      e.preventDefault()
-      const fromId = e.dataTransfer.getData('text/plain')
-      if (fromId && fromId !== snippet.id) dispatch({ type: 'reorder', fromId, toId: snippet.id })
-    },
     children: [
-      jsx('span', {
-        style: dragHandleStyle,
-        title: t('row.dragHint'),
-        draggable: true,
-        onDragStart: e => {
-          e.dataTransfer.setData('text/plain', snippet.id)
-          e.dataTransfer.effectAllowed = 'move'
-          setDragging(true)
-        },
-        onDragEnd: () => setDragging(false),
-        children: '⠿'
-      }),
       jsx('span', { style: leadIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }),
       jsx(
         'button',
@@ -429,6 +438,70 @@ function SnippetRow({ snippet, idx, total, dispatch, t }) {
           jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.edit'), onClick: () => dispatch({ type: 'edit', id: snippet.id }), children: '✎' }),
           jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.del'), onClick: () => dispatch({ type: 'delete', id: snippet.id }), children: '✕' })
         ]
+      }),
+      jsx('span', {
+        style: dragHandleStyle,
+        title: t('row.dragHint'),
+        onPointerDown: e => {
+          // Pointer-capture drag (dnd-kit's underlying mechanism): the whole
+          // row visually follows the pointer via transform; rows between
+          // origin and pointer slide via the same preview transform; commit
+          // on release. No HTML5 drag — no ghost, no flicker.
+          e.preventDefault()
+          const row = rowRef.current
+          if (!row) return
+          const rowH = row.getBoundingClientRect().height
+          const startY = e.clientY
+          row.setPointerCapture(e.pointerId)
+          setPointerDragging(true)
+          $dragFromId.set(snippet.id)
+          $dragOverId.set(snippet.id)
+
+          let lastOver = snippet.id
+          function onMove(ev) {
+            const dy = ev.clientY - startY
+            row.style.transform = `translateY(${dy}px)`
+            row.style.zIndex = '10'
+            const steps = Math.round(dy / rowH)
+            const idx = list.findIndex(s => s.id === snippet.id)
+            const target = list[idx + steps]
+            if (target && target.id !== lastOver) {
+              lastOver = target.id
+              $dragOverId.set(target.id)
+            }
+          }
+          function onUp(ev) {
+            window.removeEventListener('pointermove', onMove)
+            window.removeEventListener('pointerup', onUp)
+            row.releasePointerCapture(e.pointerId)
+            // Smooth landing: commit the reorder first (DOM reflows to the new
+            // order while the dragged row still carries its drag offset), then
+            // transition the inline transform back to identity so the row
+            // glides into its new slot instead of snapping.
+            const from = $dragFromId.get()
+            const over = $dragOverId.get()
+            if (from && over && from !== over) {
+              dispatch({ type: 'reorder', fromId: from, toId: over })
+            }
+            // Clear drag atoms immediately: after the reorder, every row is
+            // already at its final document position (shift collapses to 0),
+            // so clearing here causes no visual jump.
+            $dragFromId.set(null)
+            $dragOverId.set(null)
+            row.style.transition = 'transform 180ms ease'
+            requestAnimationFrame(() => {
+              row.style.transform = ''
+              setTimeout(() => {
+                row.style.transition = ''
+                row.style.zIndex = ''
+                setPointerDragging(false)
+              }, 200)
+            })
+          }
+          window.addEventListener('pointermove', onMove)
+          window.addEventListener('pointerup', onUp)
+        },
+        children: '⠿'
       })
     ]
   })
@@ -478,40 +551,45 @@ function SnippetForm({ draft, onDraft, t }) {
 
 // ── Quick picker (Cmd-K style: filter + ↑↓ + ↵) ───────────────────────────
 
+// Official `/` drawer skin (composerPanelCard, composer-dock.ts:31-35) inlined:
+// rounded-2xl, hairline border-border/65, shadow-nous (4-layer stack verified
+// in dist CSS), --dt-card 72% translucent fill + backdrop blur, tool font size.
+// Width = full composer width (left/right 0) like the official drawer.
 const inlineShellStyle = {
-  position: 'absolute',
-  left: '8px',
-  bottom: '100%',
-  marginBottom: '4px',
+  position: 'fixed',
   zIndex: 50,
-  width: '320px',
-  maxWidth: 'calc(100% - 1rem)',
-  maxHeight: 'min(352px, calc(100vh - 128px))',
+  // Official DRAWER_SHELL: max-h-[min(22rem,calc(100vh-8rem))] + p-1.
+  maxHeight: 'min(22rem, calc(100vh - 8rem))',
   overflowY: 'auto',
   overscrollBehavior: 'contain',
   padding: '4px',
-  borderRadius: '12px',
-  border: '1px solid var(--ui-stroke-tertiary)',
-  background: 'var(--ui-bg-elevated, var(--card, #fff))',
-  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)'
+  borderRadius: 'calc(var(--radius-scalar, 1) * 1.5rem)',
+  border: '1px solid color-mix(in srgb, var(--border) 65%, transparent)',
+  background: 'color-mix(in srgb, var(--dt-card) 72%, transparent)',
+  backdropFilter: 'blur(0.75rem) saturate(1.12)',
+  WebkitBackdropFilter: 'blur(0.75rem) saturate(1.12)',
+  boxShadow: '0 0.125rem 0.25rem -0.125rem #00000012, 0 0.5rem 0.75rem -0.375rem #0000000f, 0 1.25rem 1.75rem -0.875rem #0000000f',
+  fontSize: 'var(--conversation-tool-font-size)'
 }
 
 const quickListStyle = {
   display: 'grid',
   gap: '2px',
-  maxHeight: '300px',
-  overflowY: 'auto',
-  marginTop: '6px'
+  // The shell itself scrolls (official drawer: overflow-y-auto on the shell).
+  overflowY: 'visible',
+  marginTop: '2px'
 }
 
+// Official trigger-popover ROW_CLASS: flex items-center gap-2 rounded-md
+// px-2 py-1; hover bg-(--ui-bg-tertiary); highlighted same.
 const quickRowStyle = {
   display: 'flex',
   alignItems: 'center',
-  gap: '10px',
-  padding: '7px 10px',
+  gap: '8px',
+  padding: '4px 8px',
   borderRadius: '6px',
-  border: '1px solid transparent',
-  cursor: 'pointer',
+  cursor: 'default',
+  userSelect: 'none',
   background: 'transparent',
   width: '100%',
   textAlign: 'left',
@@ -520,16 +598,50 @@ const quickRowStyle = {
 }
 
 const quickRowActiveStyle = {
-  background: 'var(--ui-control-hover-background)',
-  borderColor: 'var(--ui-stroke-tertiary)'
+  background: 'var(--ui-bg-tertiary)'
 }
 
 const quickInputRowStyle = {
   display: 'flex',
   alignItems: 'center',
   gap: '8px',
-  borderBottom: '1px solid var(--border, rgba(127, 127, 127, 0.25))',
-  paddingBottom: '8px'
+  padding: '4px 8px 6px',
+  borderBottom: '1px solid color-mix(in srgb, var(--border) 65%, transparent)'
+}
+
+// Official row icon column: grid size-4 place-items-center (16px). Reused by
+// the filter row lead icon and each row's icon.
+const quickIconStyle = {
+  display: 'grid',
+  placeItems: 'center',
+  width: '16px',
+  height: '16px',
+  flexShrink: 0,
+  color: 'var(--ui-text-tertiary)'
+}
+
+// Name: official `min-w-0 shrink truncate font-medium leading-5 text-foreground`.
+const quickNameStyle = {
+  minWidth: 0,
+  flexShrink: 0,
+  fontWeight: 500,
+  lineHeight: '1.25rem',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis',
+  color: 'var(--foreground)'
+}
+
+// Description: official `min-w-0 flex-1 truncate leading-5
+// text-(--ui-text-tertiary)`.
+const quickDescStyle = {
+  flex: 1,
+  minWidth: 0,
+  lineHeight: '1.25rem',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis',
+  color: 'var(--ui-text-tertiary)'
 }
 
 function filterSnippets(list, query) {
@@ -540,15 +652,44 @@ function filterSnippets(list, query) {
   )
 }
 
-function InlinePicker({ snippets, onPick, onClose, t }) {
+function InlinePicker({ snippets, onPick, onClose, t, composerEl }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
+  const [pickerEl, setPickerEl] = useState(null)
   const filtered = filterSnippets(snippets, query)
 
   // Clamp active row when the filtered list shrinks.
   if (active >= filtered.length && filtered.length > 0) {
     setActive(0)
   }
+
+  // Dialog-parity dismissal (the inline layer has no Radix auto-close):
+  // Escape anywhere in the window + pointerdown outside the layer both close.
+  useEffect(() => {
+    if (!pickerEl) return undefined
+
+    function isInside(target) {
+      return target && pickerEl.contains(target)
+    }
+
+    function onGlobalKeyDown(e) {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+    }
+
+    function onGlobalPointerDown(e) {
+      if (!isInside(e.target)) onClose()
+    }
+
+    window.addEventListener('keydown', onGlobalKeyDown, true)
+    window.addEventListener('pointerdown', onGlobalPointerDown, true)
+    return () => {
+      window.removeEventListener('keydown', onGlobalKeyDown, true)
+      window.removeEventListener('pointerdown', onGlobalPointerDown, true)
+    }
+  }, [pickerEl, onClose])
 
   function onKeyDown(e) {
     if (e.key === 'ArrowDown') {
@@ -561,28 +702,47 @@ function InlinePicker({ snippets, onPick, onClose, t }) {
       e.preventDefault()
       const sn = filtered[active]
       if (sn) onPick(sn)
-    } else if (e.key === 'Escape') {
-      // Keep composer-level Esc semantics (cancel turn, close overlays) from
-      // also firing — this layer owns Escape while it is open.
-      e.preventDefault()
-      e.stopPropagation()
-      onClose()
     }
   }
 
-  // Inline shell: same geometry as the official `/` completion drawer
-  // (completion-drawer.tsx DRAWER_SHELL, translated to inline style — plugin
-  // classes outside the compiled set are dead strings). absolute + bottom-full
-  // floats the layer just above the composer, inside the dock's positioning
-  // context; the underside slot shares that context so no extra offset work.
+  // Inline shell: same skin as the official `/` completion drawer. The official
+  // drawer is `absolute` inside ComposerPrimitive.Root with left-2 (8px inset),
+  // bottom-full mb-1 (4px above the composer top) and w-80
+  // max-w-[calc(100%-1rem)] (320px, capped at composer width minus 16px).
+  // Plugin slots cannot render inside ComposerPrimitive.Root, so this fixed
+  // stand-in measures THE INSTANCE'S OWN composer (passed down from the host
+  // probe — never a global querySelector, which grabs the wrong composer when
+  // sessions are split) and reproduces those exact offsets.
+  const [pos, setPos] = useState(null)
+  useEffect(() => {
+    if (!composerEl) return
+    const measure = () => {
+      const rect = composerEl.getBoundingClientRect()
+      if (!rect.width) return
+      setPos({
+        bottom: window.innerHeight - rect.top + 4, // mb-1 above composer top
+        left: rect.left + 8, // left-2
+        width: Math.min(320, rect.width - 16) // w-80, max-w-[calc(100%-1rem)]
+      })
+    }
+    measure()
+    // The official drawer is CSS-anchored and never goes stale; the fixed
+    // stand-in must re-measure when the window layout changes.
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [composerEl])
+
+  if (!pos) return null
+
   return jsxs('div', {
-    style: inlineShellStyle,
+    ref: setPickerEl,
+    style: { ...inlineShellStyle, ...pos },
     onKeyDown,
     children: [
       jsxs('div', {
         style: quickInputRowStyle,
         children: [
-          jsx('span', { style: leadIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }),
+          jsx('span', { style: quickIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }),
           jsx(Input, {
             value: query,
             onChange: e => {
@@ -612,15 +772,13 @@ function InlinePicker({ snippets, onPick, onClose, t }) {
                     onClick: () => onPick(sn),
                     onMouseEnter: () => setActive(i),
                     style: { ...quickRowStyle, ...(i === active ? quickRowActiveStyle : null) },
-                    children: jsxs('span', {
-                      style: rowBodyStyle,
-                      children: [
-                        jsx('span', { style: rowLabelStyle, children: sn.label }),
-                        sn.description
-                          ? jsx('span', { style: rowDescStyle, children: sn.description })
-                          : null
-                      ]
-                    })
+                    children: [
+                      jsx('span', { style: quickIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }),
+                      jsx('span', { style: quickNameStyle, children: sn.label }),
+                      sn.description
+                        ? jsx('span', { style: quickDescStyle, children: sn.description })
+                        : null
+                    ]
                   },
                 )
               )
@@ -803,13 +961,20 @@ function ManagerDialog() {
   // Dialog. It must sit OUTSIDE the Dialog wrapper: the layer positions
   // against the composer dock, not the (body-portaled) dialog.
   const closePicker = () => $managerOpen.set(false)
+  // This instance's own composer: the nearest [data-slot="composer-root"]
+  // ABOVE the probe in the DOM tree. The probe lives in this session's
+  // composer dock, so this is always the right composer — a global
+  // querySelector would grab whichever composer renders first (wrong one
+  // when sessions are split/hidden).
+  const ownComposer = hostEl ? hostEl.closest('[data-slot="composer-root"]') : null
   return jsx('div', {
     ref: setHostEl,
-    style: { display: 'contents' },
+    style: { position: 'absolute', inset: '0px', pointerEvents: 'none' },
     children:
       shouldShow && mode === 'quick' && editing === null
         ? jsx(InlinePicker, {
             snippets: list,
+            composerEl: ownComposer,
             onPick: sn => {
               if (!insertIntoComposer(sn.text)) {
                 host.notify({ kind: 'error', message: t('notify.insertFailed') })
@@ -844,7 +1009,7 @@ function ManagerDialog() {
                           style: { padding: '12px 0', textAlign: 'center', fontSize: '13px', opacity: 0.6 },
                           children: t('manage.empty')
                         })
-                      : list.map((sn, i) => jsx(SnippetRow, { snippet: sn, idx: i, total: list.length, dispatch, t }, sn.id))
+                      : list.map(sn => jsx(SnippetRow, { snippet: sn, list, dispatch, t }, sn.id))
                 }),
                 jsxs(DialogFooter, {
                   style: { marginTop: '8px' },
@@ -962,10 +1127,14 @@ export default {
     }
     registerStaticContributions()
 
-    // Dialog host — underside renders nothing visible when closed (null).
+    // Dialog host — top strip is INSIDE ComposerPrimitive.Root (same anchor as
+    // the official `/` drawer): the inline picker's absolute bottom-full then
+    // floats right above the composer without shifting it. underside (below
+    // the composer) anchored the layer against the whole dock instead, which
+    // pushed the composer up — that was the "input moves" bug.
     ctx.register({
       id: 'snippets-manager-host',
-      area: COMPOSER_AREAS.underside,
+      area: COMPOSER_AREAS.top,
       render: () => jsx(ManagerDialog, {})
     })
 
@@ -1002,5 +1171,6 @@ export default {
     }
   }
 }
+
 
 
