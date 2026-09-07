@@ -409,10 +409,20 @@ function SnippetRow({ snippet, list, dispatch, t }) {
         ? { opacity: 0.85, boxShadow: '0 8px 24px rgba(0,0,0,0.25)', zIndex: 10, position: 'relative' }
         : null),
       transform: shift && !pointerDragging ? `translateY(${shift * 100}%)` : undefined,
-      transition: 'transform 150ms ease'
+      // On the commit frame the doc-flow already matches the preview the user
+      // saw (they watched the rows slide while dragging) — transitioning
+      // again would double-animate. Freeze exactly that frame.
+      transition: document.body.dataset.snippetsCommitting ? 'none' : 'transform 150ms ease'
     },
-    onMouseEnter: () => setHover(true),
-    onMouseLeave: () => setHover(false),
+    onMouseEnter: () => {
+      // Hover locked during ANY drag (module atom): mousemove over other rows
+      // while dragging would flip their hover state and re-render the whole
+      // list every row boundary crossed — one of the flicker sources.
+      if (!fromId) setHover(true)
+    },
+    onMouseLeave: () => {
+      if (!fromId) setHover(false)
+    },
     children: [
       jsx('span', { style: leadIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }),
       jsx(
@@ -474,28 +484,49 @@ function SnippetRow({ snippet, list, dispatch, t }) {
             window.removeEventListener('pointermove', onMove)
             window.removeEventListener('pointerup', onUp)
             row.releasePointerCapture(e.pointerId)
-            // Smooth landing: commit the reorder first (DOM reflows to the new
-            // order while the dragged row still carries its drag offset), then
-            // transition the inline transform back to identity so the row
-            // glides into its new slot instead of snapping.
             const from = $dragFromId.get()
             const over = $dragOverId.get()
-            if (from && over && from !== over) {
+            const moved = from && over && from !== over
+            // FLIP landing: record where the row VISUALLY is (doc-flow slot +
+            // inline drag offset) BEFORE the commit, then after React reflows
+            // set a residual transform so the row is pixel-identical — no jump
+            // — and glide the residual to zero. The old code cleared the big
+            // inline offset AFTER the reflow, so the first frame painted the
+            // row at its old position: that was the flicker.
+            const rectBefore = row.getBoundingClientRect()
+            if (moved) {
+              document.body.dataset.snippetsCommitting = '1' // see Task 3: freeze sibling transitions on the commit frame
               dispatch({ type: 'reorder', fromId: from, toId: over })
             }
-            // Clear drag atoms immediately: after the reorder, every row is
-            // already at its final document position (shift collapses to 0),
-            // so clearing here causes no visual jump.
             $dragFromId.set(null)
             $dragOverId.set(null)
-            row.style.transition = 'transform 180ms ease'
+            setPointerDragging(false)
+            // Same DOM node after reorder (row key = snippet.id).
             requestAnimationFrame(() => {
-              row.style.transform = ''
-              setTimeout(() => {
-                row.style.transition = ''
+              const rectAfter = row.getBoundingClientRect()
+              const dy = rectBefore.top - rectAfter.top
+              if (Math.abs(dy) < 1) {
+                row.style.transform = ''
                 row.style.zIndex = ''
-                setPointerDragging(false)
-              }, 200)
+                row.style.transition = ''
+                delete document.body.dataset.snippetsCommitting
+                return
+              }
+              // Residual: pin the row where the user dropped it…
+              row.style.transition = 'none'
+              row.style.transform = `translateY(${dy}px)`
+              delete document.body.dataset.snippetsCommitting
+              requestAnimationFrame(() => {
+                // …then glide it into its new slot.
+                row.style.transition = 'transform 180ms ease'
+                row.style.transform = ''
+                const cleanup = () => {
+                  row.style.transition = ''
+                  row.style.zIndex = ''
+                }
+                row.addEventListener('transitionend', cleanup, { once: true })
+                setTimeout(cleanup, 220) // safety net if transitionend is eaten
+              })
             })
           }
           window.addEventListener('pointermove', onMove)
