@@ -28,7 +28,7 @@ const LOCALES = {
     menu: { label: 'My Snippets' },
     manage: {
       title: 'My Snippets',
-      desc: 'Click a snippet to insert it. Buttons on the right: edit / move up / move down / delete.',
+      desc: 'Click a snippet to insert it. Drag the ⠿ handle to reorder; buttons on the right: edit / delete.',
       add: 'Add', done: 'Done', empty: 'No snippets yet — click "Add" below to create one',
       editTitle: 'Edit Snippet', addTitle: 'New Snippet',
       formDesc: 'Label and content are required.',
@@ -41,14 +41,14 @@ const LOCALES = {
       filterPh: 'Type to filter, ↑↓ to move, ↵ to insert, Esc to close',
       empty: 'No matching snippets'
     },
-    row: { edit: 'Edit', up: 'Move up', down: 'Move down', del: 'Delete' },
+    row: { edit: 'Edit', del: 'Delete', dragHint: 'Drag to reorder' },
     notify: { insertFailed: 'Insert failed: composer unavailable', corrupted: 'Snippet data corrupted — reset to empty' }
   },
   zh: {
     menu: { label: '我的片段' },
     manage: {
       title: '我的片段',
-      desc: '点选片段插入输入框；右侧按钮依次是编辑 / 上移 / 下移 / 删除。',
+      desc: '点选片段插入输入框；拖动行首 ⠿ 排序，右侧按钮是编辑 / 删除。',
       add: '新增', done: '完成', empty: '还没有片段，点下方「新增」加一条',
       editTitle: '编辑片段', addTitle: '新增片段',
       formDesc: '名称和内容必填。',
@@ -61,14 +61,14 @@ const LOCALES = {
       filterPh: '输入过滤，↑↓ 选择，↵ 插入，Esc 关闭',
       empty: '没有匹配的片段'
     },
-    row: { edit: '编辑', up: '上移', down: '下移', del: '删除' },
+    row: { edit: '编辑', del: '删除', dragHint: '拖动排序' },
     notify: { insertFailed: '插入失败：输入框不可用', corrupted: '片段数据损坏，已重置为空' }
   },
   'zh-hant': {
     menu: { label: '我的片段' },
     manage: {
       title: '我的片段',
-      desc: '點選片段插入輸入框；右側按鈕依次是編輯 / 上移 / 下移 / 刪除。',
+      desc: '點選片段插入輸入框；拖動行首 ⠿ 排序，右側按鈕是編輯 / 刪除。',
       add: '新增', done: '完成', empty: '還沒有片段，點下方「新增」加一條',
       editTitle: '編輯片段', addTitle: '新增片段',
       formDesc: '名稱和內容必填。',
@@ -81,7 +81,7 @@ const LOCALES = {
       filterPh: '輸入過濾，↑↓ 選擇，↵ 插入，Esc 關閉',
       empty: '沒有符合的片段'
     },
-    row: { edit: '編輯', up: '上移', down: '下移', del: '刪除' },
+    row: { edit: '編輯', del: '刪除', dragHint: '拖曳排序' },
     notify: { insertFailed: '插入失敗：輸入框不可用', corrupted: '片段資料損壞，已重設為空' }
   }
 }
@@ -114,6 +114,18 @@ export function moveSnippet(list, id, dir) {
   if (i < 0 || j < 0 || j >= list.length) return list
   const next = [...list]
   ;[next[i], next[j]] = [next[j], next[i]]
+  return next
+}
+
+// Drag-drop reorder: move `fromId` onto `toId`'s slot (splice semantics, not
+// adjacent-swap — the drop target can be anywhere in the list). Pure.
+export function reorderSnippet(list, fromId, toId) {
+  const from = list.findIndex(s => s.id === fromId)
+  const to = list.findIndex(s => s.id === toId)
+  if (from < 0 || to < 0 || from === to) return list
+  const next = [...list]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
   return next
 }
 
@@ -353,13 +365,46 @@ const actionsWrapStyle = {
 
 const actionsWrapHoverStyle = { opacity: 1 }
 
+const dragHandleStyle = {
+  cursor: 'grab',
+  color: 'var(--ui-text-tertiary)',
+  fontSize: '14px',
+  lineHeight: 1,
+  padding: '2px 4px',
+  flexShrink: 0,
+  userSelect: 'none'
+}
+
 function SnippetRow({ snippet, idx, total, dispatch, t }) {
   const [hover, setHover] = useState(false)
+  const [dragging, setDragging] = useState(false)
   return jsxs('div', {
-    style: { ...rowStyle, ...(hover ? rowHoverStyle : null) },
+    style: {
+      ...rowStyle,
+      ...(hover ? rowHoverStyle : null),
+      ...(dragging ? { opacity: 0.4 } : null)
+    },
     onMouseEnter: () => setHover(true),
     onMouseLeave: () => setHover(false),
+    onDragOver: e => e.preventDefault(),
+    onDrop: e => {
+      e.preventDefault()
+      const fromId = e.dataTransfer.getData('text/plain')
+      if (fromId && fromId !== snippet.id) dispatch({ type: 'reorder', fromId, toId: snippet.id })
+    },
     children: [
+      jsx('span', {
+        style: dragHandleStyle,
+        title: t('row.dragHint'),
+        draggable: true,
+        onDragStart: e => {
+          e.dataTransfer.setData('text/plain', snippet.id)
+          e.dataTransfer.effectAllowed = 'move'
+          setDragging(true)
+        },
+        onDragEnd: () => setDragging(false),
+        children: '⠿'
+      }),
       jsx('span', { style: leadIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }),
       jsx(
         'button',
@@ -382,8 +427,6 @@ function SnippetRow({ snippet, idx, total, dispatch, t }) {
         style: { ...actionsWrapStyle, ...(hover ? actionsWrapHoverStyle : null) },
         children: [
           jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.edit'), onClick: () => dispatch({ type: 'edit', id: snippet.id }), children: '✎' }),
-          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.up'), onClick: () => dispatch({ type: 'move', id: snippet.id, dir: -1 }), disabled: idx === 0, children: '↑' }),
-          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.down'), onClick: () => dispatch({ type: 'move', id: snippet.id, dir: 1 }), disabled: idx === total - 1, children: '↓' }),
           jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.del'), onClick: () => dispatch({ type: 'delete', id: snippet.id }), children: '✕' })
         ]
       })
@@ -435,7 +478,23 @@ function SnippetForm({ draft, onDraft, t }) {
 
 // ── Quick picker (Cmd-K style: filter + ↑↓ + ↵) ───────────────────────────
 
-const QUICK_MAX_W = 'max-w-lg'
+const inlineShellStyle = {
+  position: 'absolute',
+  left: '8px',
+  bottom: '100%',
+  marginBottom: '4px',
+  zIndex: 50,
+  width: '320px',
+  maxWidth: 'calc(100% - 1rem)',
+  maxHeight: 'min(352px, calc(100vh - 128px))',
+  overflowY: 'auto',
+  overscrollBehavior: 'contain',
+  padding: '4px',
+  borderRadius: '12px',
+  border: '1px solid var(--ui-stroke-tertiary)',
+  background: 'var(--ui-bg-elevated, var(--card, #fff))',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)'
+}
 
 const quickListStyle = {
   display: 'grid',
@@ -481,7 +540,7 @@ function filterSnippets(list, query) {
   )
 }
 
-function QuickPicker({ snippets, onPick, t }) {
+function InlinePicker({ snippets, onPick, onClose, t }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const filtered = filterSnippets(snippets, query)
@@ -502,10 +561,22 @@ function QuickPicker({ snippets, onPick, t }) {
       e.preventDefault()
       const sn = filtered[active]
       if (sn) onPick(sn)
+    } else if (e.key === 'Escape') {
+      // Keep composer-level Esc semantics (cancel turn, close overlays) from
+      // also firing — this layer owns Escape while it is open.
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
     }
   }
 
+  // Inline shell: same geometry as the official `/` completion drawer
+  // (completion-drawer.tsx DRAWER_SHELL, translated to inline style — plugin
+  // classes outside the compiled set are dead strings). absolute + bottom-full
+  // floats the layer just above the composer, inside the dock's positioning
+  // context; the underside slot shares that context so no extra offset work.
   return jsxs('div', {
+    style: inlineShellStyle,
     onKeyDown,
     children: [
       jsxs('div', {
@@ -698,6 +769,10 @@ function ManagerDialog() {
     }
     if (action.type === 'move') {
       commit(moveSnippet(list, action.id, action.dir))
+      return
+    }
+    if (action.type === 'reorder') {
+      commit(reorderSnippet(list, action.fromId, action.toId))
     }
   }
 
@@ -722,29 +797,37 @@ function ManagerDialog() {
   // Zero-size so the underside strip's `empty:hidden` visual isn't affected —
   // the strip collapses only when its slot renders nothing, and a bare div
   // with no box (display:contents contributes no layout) keeps it collapsed.
+  //
+  // quick mode renders an INLINE layer (absolute, composer's top edge) — same
+  // geometry as the official `/` completion drawer — instead of a centered
+  // Dialog. It must sit OUTSIDE the Dialog wrapper: the layer positions
+  // against the composer dock, not the (body-portaled) dialog.
+  const closePicker = () => $managerOpen.set(false)
   return jsx('div', {
     ref: setHostEl,
     style: { display: 'contents' },
-    children: shouldShow
+    children:
+      shouldShow && mode === 'quick' && editing === null
+        ? jsx(InlinePicker, {
+            snippets: list,
+            onPick: sn => {
+              if (!insertIntoComposer(sn.text)) {
+                host.notify({ kind: 'error', message: t('notify.insertFailed') })
+              }
+            },
+            onClose: closePicker,
+            t
+          })
+      : shouldShow
       ? jsx(Dialog, {
     open: true,
     onOpenChange: o => {
       if (!o) $managerOpen.set(false)
     },
     children: jsx(DialogContent, {
-      className: mode === 'quick' ? QUICK_MAX_W : DIALOG_MAX_W,
+      className: DIALOG_MAX_W,
       children:
-        mode === 'quick'
-          ? jsx(QuickPicker, {
-              snippets: list,
-              onPick: sn => {
-                if (!insertIntoComposer(sn.text)) {
-                  host.notify({ kind: 'error', message: t('notify.insertFailed') })
-                }
-              },
-              t
-            })
-        : editing === null
+        editing === null
           ? jsxs('div', {
               children: [
                 jsxs(DialogHeader, {
