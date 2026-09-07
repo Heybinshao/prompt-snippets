@@ -453,22 +453,48 @@ function SnippetRow({ snippet, list, dispatch, t }) {
         style: dragHandleStyle,
         title: t('row.dragHint'),
         onPointerDown: e => {
-          // Pointer-capture drag (dnd-kit's underlying mechanism): the whole
-          // row visually follows the pointer via transform; rows between
-          // origin and pointer slide via the same preview transform; commit
-          // on release. No HTML5 drag — no ghost, no flicker.
+          // Pointer drag session, official drag-session.ts pattern: a
+          // sub-threshold (4px) press is NOT a drag — capture/cursor/scroll
+          // lock engage only after real movement. Engaging on pointerdown
+          // made the whole window a drag surface (drag outside the dialog,
+          // wheel scrolling mid-drag scrambling the rows).
           e.preventDefault()
           const row = rowRef.current
           if (!row) return
           const rowH = row.getBoundingClientRect().height
           const startY = e.clientY
-          row.setPointerCapture(e.pointerId)
-          setPointerDragging(true)
-          $dragFromId.set(snippet.id)
-          $dragOverId.set(snippet.id)
-
+          const sx = e.clientX
+          let engaged = false
           let lastOver = snippet.id
+          let restoreCursor = null
+          let restoreSelect = null
+
+          function engage() {
+            engaged = true
+            row.setPointerCapture(e.pointerId)
+            setPointerDragging(true)
+            $dragFromId.set(snippet.id)
+            $dragOverId.set(snippet.id)
+            // Official engage chrome: kill text selection + set grabbing.
+            restoreCursor = document.body.style.cursor
+            restoreSelect = document.body.style.userSelect
+            document.body.style.cursor = 'grabbing'
+            document.body.style.userSelect = 'none'
+            // Freeze scrolling for the whole session: a wheel tick mid-drag
+            // scrolls the dialog list and every row rect goes stale.
+            document.addEventListener('wheel', blockWheel, { passive: false, capture: true })
+          }
+
+          function blockWheel(ev) {
+            ev.preventDefault()
+            ev.stopPropagation()
+          }
+
           function onMove(ev) {
+            if (!engaged) {
+              if (Math.hypot(ev.clientX - sx, ev.clientY - startY) < 4) return
+              engage()
+            }
             const dy = ev.clientY - startY
             row.style.transform = `translateY(${dy}px)`
             row.style.zIndex = '10'
@@ -481,8 +507,14 @@ function SnippetRow({ snippet, list, dispatch, t }) {
             }
           }
           function onUp(ev) {
-            window.removeEventListener('pointermove', onMove)
-            window.removeEventListener('pointerup', onUp)
+            window.removeEventListener('pointermove', onMove, true)
+            window.removeEventListener('pointerup', onUp, true)
+            window.removeEventListener('pointercancel', onCancel, true)
+            window.removeEventListener('keydown', onEsc, true)
+            document.removeEventListener('wheel', blockWheel, { capture: true })
+            if (restoreCursor !== null) document.body.style.cursor = restoreCursor
+            if (restoreSelect !== null) document.body.style.userSelect = restoreSelect
+            if (!engaged) return // sub-threshold press: plain click, nothing engaged
             row.releasePointerCapture(e.pointerId)
             const from = $dragFromId.get()
             const over = $dragOverId.get()
@@ -495,7 +527,7 @@ function SnippetRow({ snippet, list, dispatch, t }) {
             // row at its old position: that was the flicker.
             const rectBefore = row.getBoundingClientRect()
             if (moved) {
-              document.body.dataset.snippetsCommitting = '1' // see Task 3: freeze sibling transitions on the commit frame
+              document.body.dataset.snippetsCommitting = '1' // freeze sibling transitions on the commit frame
               dispatch({ type: 'reorder', fromId: from, toId: over })
             }
             $dragFromId.set(null)
@@ -529,8 +561,23 @@ function SnippetRow({ snippet, list, dispatch, t }) {
               })
             })
           }
-          window.addEventListener('pointermove', onMove)
-          window.addEventListener('pointerup', onUp)
+          function onCancel() {
+            // pointercancel (official: everything discarded, nothing commits).
+            onUp({ clientX: sx, clientY: startY, pointerId: e.pointerId, cancel: true })
+            row.style.transform = ''
+            row.style.zIndex = ''
+          }
+          function onEsc(ev) {
+            // Esc aborts the drag alone (official: top escape layer semantics).
+            if (ev.key !== 'Escape') return
+            ev.preventDefault()
+            ev.stopPropagation()
+            onCancel()
+          }
+          window.addEventListener('pointermove', onMove, true)
+          window.addEventListener('pointerup', onUp, true)
+          window.addEventListener('pointercancel', onCancel, true)
+          window.addEventListener('keydown', onEsc, true)
         },
         children: '⠿'
       })
