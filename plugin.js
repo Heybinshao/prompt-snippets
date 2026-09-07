@@ -293,7 +293,7 @@ const rowStyle = {
   cursor: 'pointer',
   alignItems: 'flex-start',
   gap: '10px', // gap-2.5
-  borderRadius: '6px', // rounded-md
+  borderRadius: 'calc(var(--radius-scalar) * 0.625rem)', // rounded-md (official compile output)
   border: '1px solid transparent',
   padding: '8px 10px', // px-2.5 py-2
   textAlign: 'left',
@@ -608,7 +608,7 @@ const quickRowStyle = {
   alignItems: 'center',
   gap: '8px',
   padding: '4px 8px',
-  borderRadius: '6px',
+  borderRadius: 'calc(var(--radius-scalar) * 0.625rem)', // rounded-md
   cursor: 'default',
   userSelect: 'none',
   background: 'transparent',
