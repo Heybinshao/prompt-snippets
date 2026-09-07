@@ -555,21 +555,35 @@ function SnippetForm({ draft, onDraft, t }) {
 // rounded-2xl, hairline border-border/65, shadow-nous (4-layer stack verified
 // in dist CSS), --dt-card 72% translucent fill + backdrop blur, tool font size.
 // Width = full composer width (left/right 0) like the official drawer.
+// Official `/` drawer geometry + skin, verbatim from COMPLETION_DRAWER_CLASS
+// (completion-drawer.tsx) and composerPanelCard (composer-dock.ts). The layer
+// is MOVED into this instance's [data-slot="composer-root"] after mount — the
+// same parent the official drawer renders in (relative anchor) — so plain CSS
+// positions it and zero JS measurement is involved. No `position: fixed`: a
+// glassy backdrop-filter ancestor hijacks the fixed coordinate system, which
+// is exactly what mis-positioned earlier attempts.
 const inlineShellStyle = {
-  position: 'fixed',
+  position: 'absolute',
+  bottom: '100%', // bottom-full
+  left: '8px', // left-2
+  marginBottom: '4px', // mb-1
   zIndex: 50,
-  // Official DRAWER_SHELL: max-h-[min(22rem,calc(100vh-8rem))] + p-1.
+  width: '20rem', // w-80
+  maxWidth: 'calc(100% - 1rem)', // max-w-[calc(100%-1rem)]
   maxHeight: 'min(22rem, calc(100vh - 8rem))',
   overflowY: 'auto',
   overscrollBehavior: 'contain',
-  padding: '4px',
-  borderRadius: 'calc(var(--radius-scalar, 1) * 1.5rem)',
-  border: '1px solid color-mix(in srgb, var(--border) 65%, transparent)',
+  padding: '4px', // p-1
+  // composerPanelCard skin, verbatim:
+  borderRadius: 'var(--radius-2xl)', // rounded-2xl (theme-variable driven)
+  border: '1px solid color-mix(in srgb, var(--border) 65%, transparent)', // border-border/65
+  boxShadow: 'var(--shadow-nous)',
   background: 'color-mix(in srgb, var(--dt-card) 72%, transparent)',
   backdropFilter: 'blur(0.75rem) saturate(1.12)',
   WebkitBackdropFilter: 'blur(0.75rem) saturate(1.12)',
-  boxShadow: '0 0.125rem 0.25rem -0.125rem #00000012, 0 0.5rem 0.75rem -0.375rem #0000000f, 0 1.25rem 1.75rem -0.875rem #0000000f',
-  fontSize: 'var(--conversation-tool-font-size)'
+  transition: 'background-color 150ms ease-out',
+  fontSize: 'var(--conversation-tool-font-size)',
+  color: 'var(--popover-foreground)'
 }
 
 const quickListStyle = {
@@ -655,7 +669,7 @@ function filterSnippets(list, query) {
 function InlinePicker({ snippets, onPick, onClose, t, composerEl }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
-  const [pickerEl, setPickerEl] = useState(null)
+  const [layerEl, setLayerEl] = useState(null)
   const filtered = filterSnippets(snippets, query)
 
   // Clamp active row when the filtered list shrinks.
@@ -666,10 +680,10 @@ function InlinePicker({ snippets, onPick, onClose, t, composerEl }) {
   // Dialog-parity dismissal (the inline layer has no Radix auto-close):
   // Escape anywhere in the window + pointerdown outside the layer both close.
   useEffect(() => {
-    if (!pickerEl) return undefined
+    if (!layerEl) return undefined
 
     function isInside(target) {
-      return target && pickerEl.contains(target)
+      return target && layerEl.contains(target)
     }
 
     function onGlobalKeyDown(e) {
@@ -689,7 +703,7 @@ function InlinePicker({ snippets, onPick, onClose, t, composerEl }) {
       window.removeEventListener('keydown', onGlobalKeyDown, true)
       window.removeEventListener('pointerdown', onGlobalPointerDown, true)
     }
-  }, [pickerEl, onClose])
+  }, [layerEl, onClose])
 
   function onKeyDown(e) {
     if (e.key === 'ArrowDown') {
@@ -705,38 +719,23 @@ function InlinePicker({ snippets, onPick, onClose, t, composerEl }) {
     }
   }
 
-  // Inline shell: same skin as the official `/` completion drawer. The official
-  // drawer is `absolute` inside ComposerPrimitive.Root with left-2 (8px inset),
-  // bottom-full mb-1 (4px above the composer top) and w-80
-  // max-w-[calc(100%-1rem)] (320px, capped at composer width minus 16px).
-  // Plugin slots cannot render inside ComposerPrimitive.Root, so this fixed
-  // stand-in measures THE INSTANCE'S OWN composer (passed down from the host
-  // probe — never a global querySelector, which grabs the wrong composer when
-  // sessions are split) and reproduces those exact offsets.
-  const [pos, setPos] = useState(null)
+  // Official `/` drawer positioning = CSS only: the drawer is a child of
+  // ComposerPrimitive.Root and anchors with absolute bottom-full left-2 mb-1.
+  // Plugin slots render OUTSIDE that root, so after mount we MOVE this layer
+  // into the instance's own composer-root — same parent, same anchor, zero
+  // measurement. React reparents nothing on pure re-render (the node is only
+  // moved once per mount); on unmount React removes it from wherever it
+  // lives, which works because we appended the very node React owns.
   useEffect(() => {
-    if (!composerEl) return
-    const measure = () => {
-      const rect = composerEl.getBoundingClientRect()
-      if (!rect.width) return
-      setPos({
-        bottom: window.innerHeight - rect.top + 4, // mb-1 above composer top
-        left: rect.left + 8, // left-2
-        width: Math.min(320, rect.width - 16) // w-80, max-w-[calc(100%-1rem)]
-      })
+    if (!layerEl || !composerEl) return
+    if (layerEl.parentElement !== composerEl) {
+      composerEl.appendChild(layerEl)
     }
-    measure()
-    // The official drawer is CSS-anchored and never goes stale; the fixed
-    // stand-in must re-measure when the window layout changes.
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [composerEl])
-
-  if (!pos) return null
+  }, [layerEl, composerEl])
 
   return jsxs('div', {
-    ref: setPickerEl,
-    style: { ...inlineShellStyle, ...pos },
+    ref: setLayerEl,
+    style: inlineShellStyle,
     onKeyDown,
     children: [
       jsxs('div', {
