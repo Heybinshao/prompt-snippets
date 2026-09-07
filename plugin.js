@@ -576,7 +576,9 @@ const inlineShellStyle = {
   padding: '4px', // p-1
   // composerPanelCard skin, verbatim:
   borderRadius: 'var(--radius-2xl)', // rounded-2xl (theme-variable driven)
-  border: '1px solid color-mix(in srgb, var(--border) 65%, transparent)', // border-border/65
+  // border-border/65 compiles to --dt-border in oklab (dist CSS verified):
+  // var(--border) does NOT exist in the theme, which made the border invisible.
+  border: '1px solid color-mix(in oklab, var(--dt-border) 65%, transparent)',
   boxShadow: 'var(--shadow-nous)',
   background: 'color-mix(in srgb, var(--dt-card) 72%, transparent)',
   backdropFilter: 'blur(0.75rem) saturate(1.12)',
@@ -620,7 +622,8 @@ const quickInputRowStyle = {
   alignItems: 'center',
   gap: '8px',
   padding: '4px 8px 6px',
-  borderBottom: '1px solid color-mix(in srgb, var(--border) 65%, transparent)'
+  // Same --dt-border/oklab fix as the shell border.
+  borderBottom: '1px solid color-mix(in oklab, var(--dt-border) 65%, transparent)'
 }
 
 // Official row icon column: grid size-4 place-items-center (16px). Reused by
