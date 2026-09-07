@@ -575,7 +575,12 @@ const inlineShellStyle = {
   overscrollBehavior: 'contain',
   padding: '4px', // p-1
   // composerPanelCard skin, verbatim:
-  borderRadius: 'var(--radius-2xl)', // rounded-2xl (theme-variable driven)
+  // rounded-2xl compiles to calc(var(--radius-scalar) * 1.5rem) — the
+  // --radius-2xl var itself lives in Tailwind's @theme inline block which is
+  // NOT emitted as a runtime CSS variable, so referencing it resolves to
+  // nothing (same trap as var(--border) before). --radius-scalar is a real
+  // :root var (styles.css:464, runtime value 0.2).
+  borderRadius: 'calc(var(--radius-scalar) * 1.5rem)',
   // border-border/65 compiles to --dt-border in oklab (dist CSS verified):
   // var(--border) does NOT exist in the theme, which made the border invisible.
   border: '1px solid color-mix(in oklab, var(--dt-border) 65%, transparent)',
