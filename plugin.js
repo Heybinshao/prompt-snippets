@@ -650,6 +650,10 @@ const inlineShellStyle = {
   maxWidth: 'calc(100% - 1rem)', // max-w-[calc(100%-1rem)]
   maxHeight: 'min(22rem, calc(100vh - 8rem))',
   overflowY: 'auto',
+  // Belt-and-braces: an auto overflow-y computes overflow-x to auto too, so
+  // any stray horizontal overflow would open a scroll channel that
+  // scroll-positioning could shift (eating the shell's left padding).
+  overflowX: 'hidden',
   overscrollBehavior: 'contain',
   padding: '4px', // p-1
   // composerPanelCard skin, verbatim:
@@ -671,8 +675,16 @@ const inlineShellStyle = {
   color: 'var(--popover-foreground)'
 }
 
+// Must NOT be `display: grid` (the original bug): a grid auto column sizes to
+// the items' max-content, so one long row pushed every row past the 20rem
+// shell — the right-hand padding + row gutter fell outside the clip and the
+// description hit the card edge with no ellipsis. The official drawer keeps
+// rows in normal flow so `w-full` is hard-bound to the container width; a
+// flex column gets the same constraint (cross-axis stretch) while keeping
+// the 2px row rhythm.
 const quickListStyle = {
-  display: 'grid',
+  display: 'flex',
+  flexDirection: 'column',
   gap: '2px',
   // The shell itself scrolls (official drawer: overflow-y-auto on the shell).
   overflowY: 'visible',
@@ -721,9 +733,12 @@ const quickIconStyle = {
 }
 
 // Name: official `min-w-0 shrink truncate font-medium leading-5 text-foreground`.
+// flexShrink must be 1 (official `shrink`) — with 0, a long label refuses to
+// compress, pushes the row past the w-80 shell and turns the layer into a
+// horizontally scrollable box (the "no width limit / margin lost on ↑↓" bug).
 const quickNameStyle = {
   minWidth: 0,
-  flexShrink: 0,
+  flexShrink: 1,
   fontWeight: 500,
   lineHeight: '1.25rem',
   overflow: 'hidden',
@@ -898,8 +913,20 @@ function openQuickLayer({ composerEl, surface, filterPh, emptyLabel, insertFaile
   }
 
   function scrollActive() {
+    // Official pattern (trigger-popover.tsx): scroll the drawer itself, never
+    // scrollIntoView — it acts on every scrollable ancestor and can shift the
+    // layer horizontally / steal focus of the layout. `nearest` semantics:
+    // move only when the row overflows exactly one edge, shortest delta wins.
     const node = listEl.children[active]
-    if (node && node.scrollIntoView) node.scrollIntoView({ block: 'nearest' })
+    if (!node) return
+    const shellRect = shell.getBoundingClientRect()
+    const rowRect = node.getBoundingClientRect()
+    const visibleTop = shellRect.top + shell.clientTop
+    const visibleBottom = visibleTop + shell.clientHeight
+    const topDelta = rowRect.top - visibleTop
+    const bottomDelta = rowRect.bottom - visibleBottom
+    if ((topDelta < 0) === (bottomDelta > 0)) return // fully visible, or spans both edges
+    shell.scrollTop += Math.abs(topDelta) < Math.abs(bottomDelta) ? topDelta : bottomDelta
   }
 
   function close({ refocus = true } = {}) {
