@@ -38,10 +38,10 @@ Hermes Agent 桌面端插件：把你自己常用的提示词存成片段，一�
 把下面这段话直接发给 Hermes：
 
 ```
-帮我安装这个桌面插件：https://github.com/Heybinshao/prompt-snippets
+从 Git 安装这个桌面插件：https://github.com/Heybinshao/prompt-snippets
 ```
 
-Hermes 会自动下载 `plugin.js` 放到正确位置（`~/.hermes/desktop-plugins/prompt-snippets/`）并完成加载。
+明确说「从 Git 安装」，Hermes 会把整个仓库 clone 进 `~/.hermes/desktop-plugins/prompt-snippets/`，留下 Git 来源记录——以后想升级，重做一遍上述安装即可拉最新版（弹窗里勾「强制重装」）。也可以走桌面端「技能与工具 → 插件」页面上方的「从 Git 安装」按钮，效果相同。
 
 ### 方式二：手动安装
 
@@ -72,7 +72,7 @@ Hermes 会自动下载 `plugin.js` 放到正确位置（`~/.hermes/desktop-plugi
 
 - 存储：浏览器 localStorage，key `hermes.plugin.prompt-snippets.snippets-v1`
 - 导出/迁移：DevTools Console 执行 `localStorage.getItem('hermes.plugin.prompt-snippets.snippets-v1')` 复制 JSON
-- 停用：Settings → Plugins 关掉 Prompt Snippets（数据保留）
+- 停用：「技能与工具 → 插件」关掉 Prompt Snippets（数据保留）
 - 卸载：删除插件目录
 
 ## 技术说明
