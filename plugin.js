@@ -1230,6 +1230,7 @@ function ManagerDialog() {
 export default {
   id: 'prompt-snippets',
   name: 'Prompt Snippets',
+  description: '提示词片段库：⌃S 内联快选插入 + 管理视图（⠿ 拖拽排序、分组标签、导入导出）。',
   register(ctx) {
     store = ctx.storage
     ensureFocusTracker()
