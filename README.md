@@ -1,4 +1,4 @@
-# Prompt Snippets — Hermes 桌面端自定义提示词片段 ![版本](https://img.shields.io/badge/版本-v1.4.5-blue)
+# Prompt Snippets — Hermes 桌面端自定义提示词片段 ![版本](https://img.shields.io/badge/版本-v1.5.0-blue)
 
 Hermes Agent 桌面端插件：把你自己常用的提示词存成片段，一键插入聊天输入框。
 
@@ -33,7 +33,21 @@ Hermes Agent 桌面端插件：把你自己常用的提示词存成片段，一�
 
 ## 安装
 
-### 方式一：让 Hermes 帮你装（推荐）
+### 方式一：官方插件目录（推荐）
+
+```bash
+hermes plugins install prompt-snippets
+```
+
+装完重启 Hermes 桌面端（⌘Q 后重新打开）即可。升级：
+
+```bash
+hermes plugins update prompt-snippets
+```
+
+> 目录条目钉在某个已评审的 commit 上——作者仓库的后续提交不会自动进目录，实际装到的版本以插件卡片上的版本号为准。
+
+### 方式二：从 Git 安装（装仓库最新提交）
 
 把下面这段话直接发给 Hermes：
 
@@ -41,13 +55,15 @@ Hermes Agent 桌面端插件：把你自己常用的提示词存成片段，一�
 从 Git 安装这个桌面插件：https://github.com/Heybinshao/prompt-snippets
 ```
 
-明确说「从 Git 安装」，Hermes 会把整个仓库 clone 进 `~/.hermes/desktop-plugins/prompt-snippets/`，留下 Git 来源记录——以后想升级，重做一遍上述安装即可拉最新版（弹窗里勾「强制重装」）。也可以走桌面端「技能与工具 → 插件」页面上方的「从 Git 安装」按钮，效果相同。
+也可以走桌面端「技能与工具 → 插件」页面上方的「从 Git 安装」按钮。这条路径装的是仓库当前提交（没有经过目录评审）；升级方式：重做一遍上述安装，弹窗里勾「强制重装」。
 
-### 方式二：手动安装
+### 方式三：手动放置
 
 1. 确认安装了 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 桌面端
-2. 下载 `plugin.js`，放到 `~/.hermes/desktop-plugins/prompt-snippets/plugin.js`（目录不存在就创建）
+2. 下载本仓库的 [`desktop/plugin.js`](desktop/plugin.js)，放到 `~/.hermes/desktop-plugins/prompt-snippets/plugin.js`（目录不存在就创建）
 3. 桌面端每 5 秒扫描该目录，落盘即自动加载（也可 ⌘K → **Reload desktop plugins**）
+
+> ⚠️ 插件入口在仓库的 `desktop/` 子目录里，别把整个仓库 clone 进 `~/.hermes/desktop-plugins/`——多出一层目录，宿主就找不到入口文件了。
 
 ## 使用
 

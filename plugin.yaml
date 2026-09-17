@@ -1,0 +1,14 @@
+name: prompt-snippets
+version: 1.5.0
+description: "Prompt snippet library for the Hermes Desktop composer: a quick-pick overlay styled after the app's own slash menu (own shortcut), plus a management view with drag reordering, group tags and import/export. Inserts into the focused session, not the active one."
+author: Heybinshao
+license: MIT
+homepage: https://github.com/Heybinshao/prompt-snippets
+tags: [desktop, composer, prompt, snippets]
+# Desktop-only package: the UI lives in desktop/plugin.js and registers nothing
+# on the agent side (no tools, hooks, middleware or env vars).
+provides_tools: []
+provides_hooks: []
+capabilities: []
+requires_env: []
+python_dependencies: []
