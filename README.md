@@ -1,4 +1,4 @@
-# Prompt Snippets — Hermes 桌面端自定义提示词片段 ![版本](https://img.shields.io/badge/版本-v1.5.0-blue)
+# Prompt Snippets — Hermes 桌面端自定义提示词片段 ![版本](https://img.shields.io/badge/版本-v1.5.1-blue)
 
 Hermes Agent 桌面端插件：把你自己常用的提示词存成片段，一键插入聊天输入框。
 
@@ -68,6 +68,9 @@ hermes plugins update prompt-snippets
 ## 使用
 
 ### 设置快捷键
+
+> **已知问题（官方侧）**：在官方设置页给本插件快捷键绑定的键位，偶发重启后丢失——根因是官方键位存储在插件注册前重写存档（hermes-agent#116331，已提）。本插件会在重新注册时自动找回自己记录的键位；若仍丢失，重新绑定一次即可。
+
 
 插件默认不绑快捷键（避免和核心按键冲突），绑定一次即可：
 

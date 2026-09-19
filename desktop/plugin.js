@@ -203,10 +203,10 @@ function firstVisibleSurface() {
 // registered (persistBindings iterates allKeybindActions). Contributed actions
 // register late (plugin scan), and any $bindings write before that rewrites
 // the store WITHOUT our override — the user's binding is wiped on every
-// restart/update. Defense: mirror the combo into plugin storage, restore it
-// into BOTH the official store (localStorage) and the contributed
-// contribution's defaults on every register. bindingsFor falls back to
-// defaults, so dispatch + the settings panel both resolve.
+// restart/update. Defense (catalog-compliant): mirror the combo into plugin
+// storage and serve it as the contributed action's defaults on every register.
+// bindingsFor falls back to defaults, so dispatch + the settings panel both
+// resolve — the plugin never writes the app's own keybind store.
 const KEYBIND_OFFICIAL_KEY = 'hermes.desktop.keybinds'
 const KEYBIND_BACKUP_KEY = 'keybind-backup-v1'
 const KEYBIND_ACTION_ID = 'prompt-snippets.openManager'
@@ -229,9 +229,14 @@ function readOfficialKeybindMap() {
   }
 }
 
-// Backup: official store still has the user's combo → mirror it. Restore: the
-// official store lost it but we hold a backup → write it back so the next
-// full reload of the app's store picks it up.
+// (v1.5.1, catalog review #116030) Read + mirror only: the user's combo in the
+// official store is copied into plugin storage (read, no write); survival of a
+// startup wipe comes from serving the backup as the KEYBINDS contribution's
+// `defaults` below — bindingsFor falls back to defaults, so dispatch + the
+// settings panel both resolve without ever writing the app's own store.
+// (Writing `hermes.desktop.keybinds` from a plugin was ruled out-of-surface;
+// the underlying "app drops a contributed keybind on reload" gap is filed
+// upstream as an apps/desktop issue.)
 function syncKeybindBackup() {
   if (!store) return
   const official = readOfficialKeybindMap()
@@ -246,11 +251,6 @@ function syncKeybindBackup() {
   const backup = store.get(KEYBIND_BACKUP_KEY, null)
   if (Array.isArray(backup) && backup.length > 0) {
     keybindBackup = backup
-    try {
-      const map = readOfficialKeybindMap() || {}
-      map[KEYBIND_ACTION_ID] = backup
-      localStorage.setItem(KEYBIND_OFFICIAL_KEY, JSON.stringify(map))
-    } catch {}
   }
 }
 
@@ -1230,7 +1230,7 @@ function ManagerDialog() {
 export default {
   id: 'prompt-snippets',
   name: 'Prompt Snippets',
-  description: '提示词片段库：⌃S 内联快选插入 + 管理视图（⠿ 拖拽排序、分组标签、导入导出）。',
+  description: 'Prompt snippet library: quick-pick overlay above the composer (own shortcut) + management view with drag reordering, tags, and import/export.',
   register(ctx) {
     store = ctx.storage
     ensureFocusTracker()
