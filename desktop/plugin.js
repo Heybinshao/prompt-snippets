@@ -14,7 +14,7 @@
  *   - insertCtx is captured fresh on every menu-row click (run), so the dialog
  *     always inserts through a closure from the current composer render.
  */
-import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Codicon, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
+import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Codicon, Dialog, DialogContent, Switch, DialogDescription, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useRef, useState } from 'react'
 
@@ -42,8 +42,9 @@ const LOCALES = {
       fieldText: 'Content *', fieldTextPh: 'The full prompt inserted into the composer…',
       cancel: 'Cancel', save: 'Save',
       placeholder: 'Select a snippet on the left',
-      metaName: 'name', metaDesc: 'description', metaTags: 'tags',
+      metaName: 'name', metaDesc: 'description', metaTags: 'tags', metaStatus: 'status',
       insert: 'Insert', edit: 'Edit', del: 'Delete',
+      on: 'Enabled', off: 'Disabled', toggleLabel: 'Enable or disable this snippet',
       confirmDel: 'Click again to delete',
       import: 'Import', export: 'Export',
       importTitle: 'Import snippets', importPh: 'Paste an exported JSON array…', importMerge: 'Merge'
@@ -54,7 +55,7 @@ const LOCALES = {
     },
     row: { dragHint: 'Drag to reorder' },
     notify: {
-      insertFailed: 'Insert failed: composer unavailable', corrupted: 'Snippet data corrupted — reset to empty',
+      insertFailed: 'Insert failed: composer unavailable', insertDisabled: 'Snippet is disabled — enable it first', corrupted: 'Snippet data corrupted — reset to empty',
       importBad: 'Import failed: not a valid snippets JSON array',
       importDone: 'Imported', importUnit: 'new snippets', importNone: 'Nothing new to import',
       exportDone: 'Copied to clipboard', exportEmpty: 'No snippets to export', exportFailed: 'Copy failed — try DevTools export'
@@ -76,8 +77,9 @@ const LOCALES = {
       fieldText: '内容 *', fieldTextPh: '点选后插入输入框的完整提示词…',
       cancel: '取消', save: '保存',
       placeholder: '在左侧选择一个片段',
-      metaName: '名称', metaDesc: '描述', metaTags: '标签',
+      metaName: '名称', metaDesc: '描述', metaTags: '标签', metaStatus: '状态',
       insert: '插入', edit: '编辑', del: '删除',
+      on: '已启用', off: '已停用', toggleLabel: '启用或停用该片段',
       confirmDel: '再点一次确认删除',
       import: '导入', export: '导出',
       importTitle: '导入片段', importPh: '粘贴导出的 JSON 数组…', importMerge: '合并导入'
@@ -88,7 +90,7 @@ const LOCALES = {
     },
     row: { dragHint: '拖动排序' },
     notify: {
-      insertFailed: '插入失败：输入框不可用', corrupted: '片段数据损坏，已重置为空',
+      insertFailed: '插入失败：输入框不可用', insertDisabled: '该片段已停用，请先启用', corrupted: '片段数据损坏，已重置为空',
       importBad: '导入失败：不是有效的片段 JSON 数组',
       importDone: '已导入', importUnit: '条新片段', importNone: '没有可导入的新片段',
       exportDone: '已复制到剪贴板', exportEmpty: '没有可导出的片段', exportFailed: '复制失败，请用 DevTools 导出'
@@ -110,8 +112,9 @@ const LOCALES = {
       fieldText: '內容 *', fieldTextPh: '點選後插入輸入框的完整提示詞…',
       cancel: '取消', save: '儲存',
       placeholder: '在左側選擇一個片段',
-      metaName: '名稱', metaDesc: '描述', metaTags: '標籤',
+      metaName: '名稱', metaDesc: '描述', metaTags: '標籤', metaStatus: '狀態',
       insert: '插入', edit: '編輯', del: '刪除',
+      on: '已啟用', off: '已停用', toggleLabel: '啟用或停用該片段',
       confirmDel: '再點一次確認刪除',
       import: '匯入', export: '匯出',
       importTitle: '匯入片段', importPh: '貼上匯出的 JSON 陣列…', importMerge: '合併匯入'
@@ -122,7 +125,7 @@ const LOCALES = {
     },
     row: { dragHint: '拖曳排序' },
     notify: {
-      insertFailed: '插入失敗：輸入框不可用', corrupted: '片段資料損壞，已重設為空',
+      insertFailed: '插入失敗：輸入框不可用', insertDisabled: '該片段已停用，請先啟用', corrupted: '片段資料損壞，已重設為空',
       importBad: '匯入失敗：不是有效的片段 JSON 陣列',
       importDone: '已匯入', importUnit: '條新片段', importNone: '沒有可匯入的新片段',
       exportDone: '已複製到剪貼簿', exportEmpty: '沒有可匯出的片段', exportFailed: '複製失敗，請用 DevTools 匯出'
@@ -160,9 +163,9 @@ export function normalizeTags(input) {
   return out
 }
 
-export function addSnippet(list, { label, description, text, tags }) {
+export function addSnippet(list, { label, description, text, tags, enabled }) {
   const id = `s-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-  return [...list, { id, label, description, text, tags: normalizeTags(tags) }]
+  return [...list, { id, label, description, text, tags: normalizeTags(tags), enabled: enabled !== false }]
 }
 
 export function updateSnippet(list, id, patch) {
@@ -185,7 +188,8 @@ export function mergeSnippets(list, incoming) {
       label: sn.label,
       description: typeof sn.description === 'string' ? sn.description : '',
       text: sn.text,
-      tags: normalizeTags(sn.tags)
+      tags: normalizeTags(sn.tags),
+      enabled: sn.enabled !== false
     }
     byId.set(rec.id, rec)
     out.push(rec)
@@ -361,8 +365,12 @@ function loadSnippets() {
   }
   return raw
     .filter(s => s && typeof s.label === 'string' && typeof s.text === 'string')
-    // Old records (pre-tags) load with tags: [] so the UI has one shape.
-    .map(s => (Array.isArray(s.tags) ? s : { ...s, tags: [] }))
+    // Old records load with one canonical shape: tags: [], enabled: true.
+    .map(s => ({
+      ...s,
+      tags: Array.isArray(s.tags) ? s.tags : [],
+      enabled: s.enabled !== false
+    }))
 }
 
 function saveSnippets(list) {
@@ -510,11 +518,15 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
     else if (fromIdx > overIdx && myIdx >= overIdx && myIdx < fromIdx) shift = 1
   }
   const hasSub = !!(snippet.description || (snippet.tags || []).length > 0)
+  const off = snippet.enabled === false
   return jsxs('div', {
     ref: rowRef,
     style: {
       ...rowStyle,
       height: hasSub ? '44px' : '32px', // h-11 / h-8
+      // Disabled rows recede (CapRow off-row dimming), keeping them legible
+      // but clearly not in the quick-pick pool.
+      ...(off && !selected ? { opacity: 0.45 } : null),
       ...(hover ? rowHoverStyle : null),
       ...(selected ? rowSelectedStyle : null),
       ...(isDragging && pointerDragging
@@ -565,6 +577,14 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
         },
         'body'
       ),
+      off
+        ? jsx(Codicon, {
+            name: 'circle-large-outline',
+            size: '0.875rem',
+            style: { flexShrink: 0, color: 'var(--ui-text-quaternary)' },
+            title: t('manage.off')
+          }, 'off')
+        : null,
       jsx('span', {
         style: canDrag ? dragHandleStyle : { ...dragHandleStyle, opacity: 0.3, cursor: 'default' },
         title: t('row.dragHint'),
@@ -1170,7 +1190,9 @@ let quickLayerClose = null // set while a quick layer is open; onDispose uses it
 function openQuickLayer({ composerEl, surface, filterPh, emptyLabel, insertFailedLabel }) {
   if (quickLayerClose) quickLayerClose()
   if (!composerEl) return false
-  const snippets = loadSnippets()
+  // The picker is the "daily driver" surface: disabled snippets are hidden
+  // here but stay fully visible/manageable in the manager dialog.
+  const snippets = loadSnippets().filter(sn => sn.enabled !== false)
   if (snippets.length === 0) {
     // Nothing to pick — fall to the manage view so the user can create.
     $mode.set('manage')
@@ -1482,6 +1504,13 @@ function ManagerDialog() {
   }
 
   function insertSnippet(sn) {
+    // Defensive gate: the quick picker hides disabled rows, but manager
+    // double-click / insert on a disabled row should explain, not silently
+    // insert something the user meant to retire.
+    if (sn.enabled === false) {
+      host.notify({ kind: 'info', message: t('notify.insertDisabled') })
+      return
+    }
     if (insertIntoComposer(sn.text)) return
     host.notify({ kind: 'error', message: t('notify.insertFailed') })
   }
@@ -1570,6 +1599,12 @@ function ManagerDialog() {
     }
     if (action.type === 'arm-delete') {
       setPendingDel(pendingDel === action.id ? null : action.id)
+      return
+    }
+    if (action.type === 'toggle') {
+      const sn = list.find(x => x.id === action.id)
+      if (!sn) return
+      commit(updateSnippet(list, sn.id, { enabled: sn.enabled === false }))
       return
     }
     if (action.type === 'move') {
@@ -1903,12 +1938,36 @@ function ManagerDialog() {
                             ]
                           }, 'meta'),
                           // Content = official <pre> card (same skin + mono).
-                          jsx('div', { style: preCardStyle, children: selected.text }, 'pre'),
+                          // Disabled snippets dim one step (CapRow off-row).
+                          jsx('div', {
+                            style: { ...preCardStyle, ...(selected.enabled === false ? { opacity: 0.55 } : null) },
+                            children: selected.text
+                          }, 'pre'),
                           // actionBar (DetailColumn footer pattern): pinned row
                           // under the scroll — primary insert + text buttons.
                           jsxs('div', {
                             style: { ...toolbarRowStyle, flexShrink: 0 },
                             children: [
+                              // Enable/disable: binary toggle as segmented-
+                              // equivalent Switch (hub panel discipline),
+                              // pinned left with its state word — retired
+                              // snippets vanish from the quick-pick overlay
+                              // but stay in the library.
+                              jsxs('label', {
+                                style: { display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', flexShrink: 0 },
+                                title: t('manage.toggleLabel'),
+                                children: [
+                                  jsx(Switch, {
+                                    size: 'xs',
+                                    checked: selected.enabled !== false,
+                                    onCheckedChange: () => dispatch({ type: 'toggle', id: selected.id })
+                                  }, 'sw'),
+                                  jsx('span', {
+                                    style: { fontSize: '0.68rem', color: 'var(--ui-text-tertiary)' },
+                                    children: selected.enabled === false ? t('manage.off') : t('manage.on')
+                                  }, 'txt')
+                                ]
+                              }, 'enable'),
                               jsx(Button, {
                                 variant: 'outline',
                                 size: 'sm',
