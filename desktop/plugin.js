@@ -427,6 +427,8 @@ const rowLabelLineStyle = {
   minWidth: 0
 }
 
+// CapRow title: enabled = font-medium text-foreground/85; disabled =
+// font-normal text-muted-foreground/60 (muted-foreground = --ui-text-tertiary).
 const rowLabelStyle = {
   fontSize: '0.78rem',
   fontWeight: 500,
@@ -438,19 +440,37 @@ const rowLabelStyle = {
   textOverflow: 'ellipsis'
 }
 
-// Tag chip: the official meta-badge skin (CapRow: bg-quinary rounded px-1).
-const tagChipStyle = {
+const rowLabelOffStyle = {
+  ...rowLabelStyle,
+  fontWeight: 400,
+  color: 'color-mix(in srgb, var(--ui-text-tertiary) 60%, transparent)'
+}
+
+// Tag = the official Badge (muted variant, skills-tab subtitle flavor):
+// rounded-[3px] rect, px-1 py-px, 0.6rem medium leading-none, bg-muted =
+// --ui-bg-tertiary, text-muted-foreground = --ui-text-tertiary. NOT a
+// full-round pill — that was PanelPill (category) language, wrong for tags.
+const badgeStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '4px',
   flexShrink: 0,
+  width: 'fit-content',
+  borderRadius: '3px',
+  padding: '1px 4px', // px-1 py-px
+  fontSize: '0.6rem',
+  fontWeight: 500,
+  lineHeight: 1, // leading-none
+  whiteSpace: 'nowrap',
+  background: 'var(--ui-bg-tertiary)',
+  color: 'var(--ui-text-tertiary)'
+}
+
+const tagChipStyle = {
+  ...badgeStyle,
   maxWidth: '72px',
   overflow: 'hidden',
-  whiteSpace: 'nowrap',
-  textOverflow: 'ellipsis',
-  fontSize: '0.6rem',
-  lineHeight: '14px',
-  padding: '1px 4px',
-  borderRadius: 'calc(var(--radius-scalar) * 0.25rem)',
-  background: 'var(--ui-bg-quinary)',
-  color: 'var(--ui-text-tertiary)'
+  textOverflow: 'ellipsis'
 }
 
 // One line, always. Wrapping descriptions were the height blow-out.
@@ -524,9 +544,6 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
     style: {
       ...rowStyle,
       height: hasSub ? '44px' : '32px', // h-11 / h-8
-      // Disabled rows recede (CapRow off-row dimming), keeping them legible
-      // but clearly not in the quick-pick pool.
-      ...(off && !selected ? { opacity: 0.45 } : null),
       ...(hover ? rowHoverStyle : null),
       ...(selected ? rowSelectedStyle : null),
       ...(isDragging && pointerDragging
@@ -558,7 +575,12 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
           children: jsxs('span', {
             style: rowBodyStyle,
             children: [
-              jsx('span', { style: rowLabelStyle, children: snippet.label }, 'label'),
+              jsx('span', {
+                // Official CapRow off-row language: the TITLE recedes
+                // (font-normal + muted-foreground/60), not the whole row.
+                style: off ? rowLabelOffStyle : rowLabelStyle,
+                children: snippet.label
+              }, 'label'),
               hasSub
                 ? jsxs('span', {
                     style: rowLabelLineStyle,
@@ -577,14 +599,6 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
         },
         'body'
       ),
-      off
-        ? jsx(Codicon, {
-            name: 'circle-large-outline',
-            size: '0.875rem',
-            style: { flexShrink: 0, color: 'var(--ui-text-quaternary)' },
-            title: t('manage.off')
-          }, 'off')
-        : null,
       jsx('span', {
         style: canDrag ? dragHandleStyle : { ...dragHandleStyle, opacity: 0.3, cursor: 'default' },
         title: t('row.dragHint'),
@@ -908,6 +922,19 @@ const preCardStyle = {
 
 // DetailHeader title (h3 text-[0.9375rem] font-semibold tracking-tight) +
 // PanelPill tags (rounded-full px-1.5 py-0.5 text-[0.62rem] muted tone).
+// Title-line tags = PanelPill (skill-detail header pills slot): full-round,
+// px-1.5 py-0.5, 0.62rem medium, muted tone = bg-foreground/10 + tertiary text.
+const pillStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  borderRadius: '9999px',
+  padding: '2px 6px',
+  fontSize: '0.62rem',
+  fontWeight: 500,
+  background: 'color-mix(in srgb, var(--foreground) 10%, transparent)',
+  color: 'var(--ui-text-tertiary)'
+}
+
 const detailTitleLineStyle = {
   display: 'flex',
   minHeight: '24px',
@@ -924,17 +951,6 @@ const detailTitleStyle = {
   fontSize: '0.9375rem',
   fontWeight: 600,
   letterSpacing: '-0.01em'
-}
-
-const pillStyle = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  borderRadius: '9999px',
-  padding: '2px 6px',
-  fontSize: '0.62rem',
-  fontWeight: 500,
-  background: 'color-mix(in srgb, var(--foreground) 10%, transparent)', // bg-foreground/10
-  color: 'var(--ui-text-secondary)' // text-muted-foreground ≈ secondary
 }
 
 const detailDescStyle = {
@@ -1894,7 +1910,12 @@ function ManagerDialog() {
                               jsxs('div', {
                                 style: detailTitleLineStyle,
                                 children: [
-                                  jsx('h3', { style: detailTitleStyle, children: selected.label }, 'h'),
+                                  jsx('h3', {
+                                    style: selected.enabled === false
+                                      ? { ...detailTitleStyle, fontWeight: 400, color: 'color-mix(in srgb, var(--ui-text-tertiary) 60%, transparent)' }
+                                      : detailTitleStyle,
+                                    children: selected.label
+                                  }, 'h'),
                                   (selected.tags || []).map(tag =>
                                     jsx('span', { style: pillStyle, children: tag }, tag)
                                   )
@@ -1934,15 +1955,26 @@ function ManagerDialog() {
                                       jsx('span', { style: metaValStyle, children: (selected.tags || []).join(', ') }, 'v')
                                     ]
                                   }, 'tags')
+                                : null,
+                              selected.enabled === false
+                                ? jsxs('div', {
+                                    style: metaRowStyle,
+                                    children: [
+                                      jsx('span', { style: metaKeyStyle, children: t('manage.metaStatus') }, 'k'),
+                                      jsx('span', {
+                                        style: { ...metaValStyle, display: 'inline-flex', alignItems: 'center', gap: '6px' },
+                                        children: [
+                                          jsx(Codicon, { name: 'circle-slash', size: '0.8rem', style: { color: 'var(--ui-text-tertiary)' } }, 'i'),
+                                          jsx('span', { children: t('manage.off') }, 'txt')
+                                        ]
+                                      }, 'v')
+                                    ]
+                                  }, 'status')
                                 : null
                             ]
                           }, 'meta'),
                           // Content = official <pre> card (same skin + mono).
-                          // Disabled snippets dim one step (CapRow off-row).
-                          jsx('div', {
-                            style: { ...preCardStyle, ...(selected.enabled === false ? { opacity: 0.55 } : null) },
-                            children: selected.text
-                          }, 'pre'),
+                          jsx('div', { style: preCardStyle, children: selected.text }, 'pre'),
                           // actionBar (DetailColumn footer pattern): pinned row
                           // under the scroll — primary insert + text buttons.
                           jsxs('div', {
