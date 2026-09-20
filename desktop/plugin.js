@@ -387,7 +387,12 @@ const rowStyle = {
   alignItems: 'flex-start',
   gap: '10px', // gap-2.5
   borderRadius: 'calc(var(--radius-scalar) * 0.625rem)', // rounded-md (official compile output)
-  border: '1px solid transparent',
+  // Longhands, not the `border` shorthand: selected/hover states override
+  // borderColor, and React breaks the remove-on-rerender when a shorthand
+  // and a longhand for the same property are mixed.
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'transparent',
   padding: '8px 10px', // px-2.5 py-2
   textAlign: 'left',
   transition: 'color 150ms, background-color 150ms, border-color 150ms',
@@ -396,8 +401,9 @@ const rowStyle = {
   color: 'inherit'
 }
 
+// Hover only fills the background — no stroke. The base border stays
+// transparent; lighting it up on hover read as "an extra border appeared".
 const rowHoverStyle = {
-  borderColor: 'var(--ui-stroke-tertiary)',
   background: 'var(--ui-control-hover-background)'
 }
 
@@ -1300,10 +1306,13 @@ function ManagerDialog() {
   // Reload data on each open (render-phase state adjustment pattern).
   if (open && !wasOpen) {
     setWasOpen(true)
-    setList(loadSnippets())
+    const loaded = loadSnippets()
+    setList(loaded)
     setEditing(null)
     setView('preview')
-    setSelectedId(null)
+    // Land with the first snippet selected — the manager never opens into an
+    // empty right pane.
+    setSelectedId(loaded.length > 0 ? loaded[0].id : null)
     setSearch('')
     setTagFilter(null)
     setPendingDel(null)
@@ -1564,6 +1573,10 @@ function ManagerDialog() {
     },
     children: jsx(DialogContent, {
       className: DIALOG_MAX_W,
+      // Radix auto-focuses the first focusable element = the search input,
+      // so the manager opened with a blinking caret in search. Suppress it;
+      // the first snippet is selected instead (see the open-time state reset).
+      onOpenAutoFocus: e => e.preventDefault(),
       children: jsxs('div', {
         children: [
           jsxs(DialogHeader, {
