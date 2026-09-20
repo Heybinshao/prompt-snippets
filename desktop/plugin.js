@@ -750,28 +750,33 @@ function SnippetForm({ draft, onDraft, t }) {
 
 const managerBodyStyle = {
   display: 'flex',
-  gap: '12px',
+  gap: 0, // column seam = left pane padding + hairline (see pane styles)
   minHeight: 0,
-  height: 'min(56vh, 520px)',
+  flex: 1,
   width: '100%'
 }
 
+// Region separation with the official page's language = a 1px hairline on
+// the column seam (the MasterDetail sash line), not margins alone.
 const paneLeftStyle = {
   display: 'flex',
   flexDirection: 'column',
   gap: '8px',
   width: '260px',
   flexShrink: 0,
-  minHeight: 0
+  minHeight: 0,
+  paddingRight: '13px',
+  borderRight: '1px solid var(--ui-stroke-secondary)'
 }
 
 const paneRightStyle = {
   display: 'flex',
   flexDirection: 'column',
-  gap: '8px',
+  gap: '10px',
   flex: 1,
   minWidth: 0,
-  minHeight: 0
+  minHeight: 0,
+  paddingLeft: '13px'
 }
 
 const listScrollStyle = {
@@ -1654,9 +1659,15 @@ function ManagerDialog() {
       // the first snippet is selected instead (see the open-time state reset).
       onOpenAutoFocus: e => e.preventDefault(),
       children: jsxs('div', {
+        // Vertical rhythm = the official body grid's gap-3 plus one more
+        // step of air before the two panes; without this the title block
+        // sat flush on the list (the wrapper ate the body gap). The 1fr
+        // grid track gives us full remaining height; pin it so the two
+        // panes get a definite box to scroll inside.
+        style: { display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0, height: 'min(58vh, 540px)' },
         children: [
           jsxs('div', {
-            style: { display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 },
+            style: { display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flexShrink: 0 },
             children: [
               jsxs(DialogHeader, {
                 style: { flex: 1, minWidth: 0, textAlign: 'left' },
