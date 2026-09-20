@@ -14,12 +14,14 @@
  *   - insertCtx is captured fresh on every menu-row click (run), so the dialog
  *     always inserts through a closure from the current composer render.
  */
-import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
+import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
 const STORAGE_KEY = 'snippets-v1'
-const DIALOG_MAX_W = 'max-w-md'
+// Two-pane manager gets a wider shell: max-w-3xl is a compiled dist class and
+// wins the twMerge conflict against DialogContent's built-in max-w-lg.
+const DIALOG_MAX_W = 'max-w-3xl'
 const ID = 'prompt-snippets'
 
 // ── i18n locale bundles（跟随 app 语言；解析链 当前 locale → en → 键名）──────
@@ -28,61 +30,103 @@ const LOCALES = {
     menu: { label: 'My Snippets' },
     manage: {
       title: 'My Snippets',
-      desc: 'Click a snippet to insert it. Drag the ⠿ handle on the right to reorder; buttons on the right: edit / delete.',
+      desc: 'Select a snippet on the left to preview and edit; insert with the button or double-click a row. Drag ⠿ to reorder (paused while filtering).',
       add: 'Add', done: 'Done', empty: 'No snippets yet — click "Add" below to create one',
+      noMatch: 'No matching snippets',
+      searchPh: 'Search by name or description…',
       editTitle: 'Edit Snippet', addTitle: 'New Snippet',
       formDesc: 'Label and content are required.',
       fieldLabel: 'Label *', fieldLabelPh: 'e.g. Code review',
       fieldDesc: 'Description (optional)', fieldDescPh: 'One line about what it is for',
+      fieldTags: 'Tags (optional, comma-separated)', fieldTagsPh: 'e.g. writing, review',
       fieldText: 'Content *', fieldTextPh: 'The full prompt inserted into the composer…',
-      cancel: 'Cancel', save: 'Save'
+      cancel: 'Cancel', save: 'Save',
+      placeholder: 'Select a snippet on the left',
+      content: 'Content', insert: 'Insert', edit: 'Edit', del: 'Delete',
+      confirmDel: 'Click again to delete',
+      import: 'Import', export: 'Export',
+      importTitle: 'Import snippets', importPh: 'Paste an exported JSON array…', importMerge: 'Merge',
+      preview: 'Preview — switch to Edit to change it'
     },
     quick: {
       filterPh: 'Type to filter, ↑↓ to move, ↵ to insert, Esc to close',
       empty: 'No matching snippets'
     },
-    row: { edit: 'Edit', del: 'Delete', dragHint: 'Drag to reorder' },
-    notify: { insertFailed: 'Insert failed: composer unavailable', corrupted: 'Snippet data corrupted — reset to empty' }
+    row: { dragHint: 'Drag to reorder' },
+    notify: {
+      insertFailed: 'Insert failed: composer unavailable', corrupted: 'Snippet data corrupted — reset to empty',
+      importBad: 'Import failed: not a valid snippets JSON array',
+      importDone: 'Imported', importUnit: 'new snippets', importNone: 'Nothing new to import',
+      exportDone: 'Copied to clipboard', exportEmpty: 'No snippets to export', exportFailed: 'Copy failed — try DevTools export'
+    }
   },
   zh: {
     menu: { label: '我的片段' },
     manage: {
       title: '我的片段',
-      desc: '点选片段插入输入框；拖动右侧 ⠿ 排序，右侧按钮是编辑 / 删除。',
+      desc: '左侧点选片段进行预览和编辑；点「插入」按钮或双击行插入。按住 ⠿ 拖动排序（搜索时暂停）。',
       add: '新增', done: '完成', empty: '还没有片段，点下方「新增」加一条',
+      noMatch: '没有匹配的片段',
+      searchPh: '按名称或描述搜索…',
       editTitle: '编辑片段', addTitle: '新增片段',
       formDesc: '名称和内容必填。',
       fieldLabel: '名称 *', fieldLabelPh: '如：代码审查',
       fieldDesc: '描述（可选）', fieldDescPh: '一句话说明用途',
+      fieldTags: '标签（可选，逗号分隔）', fieldTagsPh: '如：写作, 审查',
       fieldText: '内容 *', fieldTextPh: '点选后插入输入框的完整提示词…',
-      cancel: '取消', save: '保存'
+      cancel: '取消', save: '保存',
+      placeholder: '在左侧选择一个片段',
+      content: '内容', insert: '插入', edit: '编辑', del: '删除',
+      confirmDel: '再点一次确认删除',
+      import: '导入', export: '导出',
+      importTitle: '导入片段', importPh: '粘贴导出的 JSON 数组…', importMerge: '合并导入',
+      preview: '预览模式 — 点「编辑」修改'
     },
     quick: {
       filterPh: '输入过滤，↑↓ 选择，↵ 插入，Esc 关闭',
       empty: '没有匹配的片段'
     },
-    row: { edit: '编辑', del: '删除', dragHint: '拖动排序' },
-    notify: { insertFailed: '插入失败：输入框不可用', corrupted: '片段数据损坏，已重置为空' }
+    row: { dragHint: '拖动排序' },
+    notify: {
+      insertFailed: '插入失败：输入框不可用', corrupted: '片段数据损坏，已重置为空',
+      importBad: '导入失败：不是有效的片段 JSON 数组',
+      importDone: '已导入', importUnit: '条新片段', importNone: '没有可导入的新片段',
+      exportDone: '已复制到剪贴板', exportEmpty: '没有可导出的片段', exportFailed: '复制失败，请用 DevTools 导出'
+    }
   },
   'zh-hant': {
     menu: { label: '我的片段' },
     manage: {
       title: '我的片段',
-      desc: '點選片段插入輸入框；拖動右側 ⠿ 排序，右側按鈕是編輯 / 刪除。',
+      desc: '左側點選片段進行預覽和編輯；點「插入」按鈕或雙擊行插入。按住 ⠿ 拖動排序（搜尋時暫停）。',
       add: '新增', done: '完成', empty: '還沒有片段，點下方「新增」加一條',
+      noMatch: '沒有符合的片段',
+      searchPh: '按名稱或描述搜尋…',
       editTitle: '編輯片段', addTitle: '新增片段',
       formDesc: '名稱和內容必填。',
       fieldLabel: '名稱 *', fieldLabelPh: '如：代碼審查',
       fieldDesc: '描述（可選）', fieldDescPh: '一句話說明用途',
+      fieldTags: '標籤（可選，逗號分隔）', fieldTagsPh: '如：寫作, 審查',
       fieldText: '內容 *', fieldTextPh: '點選後插入輸入框的完整提示詞…',
-      cancel: '取消', save: '儲存'
+      cancel: '取消', save: '儲存',
+      placeholder: '在左側選擇一個片段',
+      content: '內容', insert: '插入', edit: '編輯', del: '刪除',
+      confirmDel: '再點一次確認刪除',
+      import: '匯入', export: '匯出',
+      importTitle: '匯入片段', importPh: '貼上匯出的 JSON 陣列…', importMerge: '合併匯入',
+      preview: '預覽模式 — 點「編輯」修改'
     },
     quick: {
       filterPh: '輸入過濾，↑↓ 選擇，↵ 插入，Esc 關閉',
       empty: '沒有符合的片段'
     },
-    row: { edit: '編輯', del: '刪除', dragHint: '拖曳排序' },
-    notify: { insertFailed: '插入失敗：輸入框不可用', corrupted: '片段資料損壞，已重設為空' }
+    row: { dragHint: '拖曳排序' },
+    notify: {
+      insertFailed: '插入失敗：輸入框不可用', corrupted: '片段資料損壞，已重設為空',
+      importBad: '匯入失敗：不是有效的片段 JSON 陣列',
+      importDone: '已匯入', importUnit: '條新片段', importNone: '沒有可匯入的新片段',
+      exportDone: '已複製到剪貼簿', exportEmpty: '沒有可匯出的片段', exportFailed: '複製失敗，請用 DevTools 匯出'
+    }
   }
 }
 
@@ -95,13 +139,59 @@ const MESSAGE_SQUARE_SVG =
 
 // ── Data layer (pure functions, return new arrays, never mutate) ──────────
 
-export function addSnippet(list, { label, description, text }) {
+// Tags are stored as a trimmed, de-duplicated string array. Accepts an array
+// or a comma-separated string (both Chinese and ASCII commas) so import and
+// the form field share one normalizer.
+export function normalizeTags(input) {
+  const arr = Array.isArray(input)
+    ? input
+    : typeof input === 'string'
+      ? input.split(/[,，]/)
+      : []
+  const seen = new Set()
+  const out = []
+  for (const raw of arr) {
+    const tag = typeof raw === 'string' ? raw.trim() : ''
+    if (tag && !seen.has(tag.toLowerCase())) {
+      seen.add(tag.toLowerCase())
+      out.push(tag)
+    }
+  }
+  return out
+}
+
+export function addSnippet(list, { label, description, text, tags }) {
   const id = `s-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-  return [...list, { id, label, description, text }]
+  return [...list, { id, label, description, text, tags: normalizeTags(tags) }]
 }
 
 export function updateSnippet(list, id, patch) {
-  return list.map(s => (s.id === id ? { ...s, ...patch } : s))
+  const next = { ...patch }
+  if ('tags' in next) next.tags = normalizeTags(next.tags)
+  return list.map(s => (s.id === id ? { ...s, ...next } : s))
+}
+
+// Import merge: keep existing ids (local wins), append genuinely new records,
+// sanitising each. Returns { list, added }.
+export function mergeSnippets(list, incoming) {
+  const byId = new Map(list.map(s => [s.id, s]))
+  let added = 0
+  const out = [...list]
+  for (const sn of incoming) {
+    if (!sn || typeof sn.label !== 'string' || typeof sn.text !== 'string') continue
+    if (byId.has(sn.id)) continue
+    const rec = {
+      id: typeof sn.id === 'string' && sn.id ? sn.id : `s-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      label: sn.label,
+      description: typeof sn.description === 'string' ? sn.description : '',
+      text: sn.text,
+      tags: normalizeTags(sn.tags)
+    }
+    byId.set(rec.id, rec)
+    out.push(rec)
+    added++
+  }
+  return { list: out, added }
 }
 
 export function removeSnippet(list, id) {
@@ -269,7 +359,10 @@ function loadSnippets() {
     store.set(STORAGE_KEY, [])
     return []
   }
-  return raw.filter(s => s && typeof s.label === 'string' && typeof s.text === 'string')
+  return raw
+    .filter(s => s && typeof s.label === 'string' && typeof s.text === 'string')
+    // Old records (pre-tags) load with tags: [] so the UI has one shape.
+    .map(s => (Array.isArray(s.tags) ? s : { ...s, tags: [] }))
 }
 
 function saveSnippets(list) {
@@ -323,15 +416,53 @@ const rowBodyStyle = {
   flex: 1
 }
 
+// Label line = name + tag chips, one flex row, hard-clamped to one line.
+const rowLabelLineStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+  minWidth: 0
+}
+
 const rowLabelStyle = {
   fontSize: '14px',
   fontWeight: 500,
-  color: 'var(--foreground)'
+  color: 'var(--foreground)',
+  minWidth: 0,
+  flexShrink: 1,
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis'
 }
 
+// Tag chip: tertiary-outline pill, tiny, non-interactive.
+const tagChipStyle = {
+  flexShrink: 0,
+  maxWidth: '72px',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis',
+  fontSize: '10px',
+  lineHeight: '14px',
+  padding: '0 5px',
+  borderRadius: 'calc(var(--radius-scalar) * 0.375rem)',
+  border: '1px solid var(--ui-stroke-tertiary)',
+  color: 'var(--ui-text-tertiary)'
+}
+
+// One line, always. Wrapping descriptions were the height blow-out.
 const rowDescStyle = {
   fontSize: 'var(--conversation-caption-font-size)',
-  color: 'var(--ui-text-tertiary)'
+  color: 'var(--ui-text-tertiary)',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis'
+}
+
+const rowSelectedStyle = {
+  borderColor: 'var(--ui-stroke-tertiary)',
+  background: 'var(--ui-control-hover-background)',
+  boxShadow: 'inset 2px 0 0 var(--foreground)'
 }
 
 const labelBtnStyle = {
@@ -347,30 +478,6 @@ const labelBtnStyle = {
   font: 'inherit'
 }
 
-const actionBtnStyle = {
-  height: '24px',
-  width: '24px',
-  padding: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontSize: '13px',
-  lineHeight: 1,
-  flexShrink: 0
-}
-
-// Longer actions row: fades in on row hover so the resting card reads exactly
-// like the official snippet rows (icon + label + description, no chrome).
-const actionsWrapStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  flexShrink: 0,
-  opacity: 0.45,
-  transition: 'opacity 120ms'
-}
-
-const actionsWrapHoverStyle = { opacity: 1 }
-
 const dragHandleStyle = {
   cursor: 'grab',
   color: 'var(--ui-text-tertiary)',
@@ -381,7 +488,13 @@ const dragHandleStyle = {
   userSelect: 'none'
 }
 
-function SnippetRow({ snippet, list, dispatch, t }) {
+// Manage-list row (two-pane layout): one compact line — label + optional tag
+// chips + ⠿ handle. Single-click selects (right pane previews), double-click
+// inserts. Label/description each clamp to ONE line (the old wrap was the
+// height blow-out). `index` = position in the CURRENTLY RENDERED list (filter
+// may hide rows) — drag target math uses it; reorder commits by id so the
+// splice semantics stay correct.
+function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
   const [hover, setHover] = useState(false)
   const [pointerDragging, setPointerDragging] = useState(false)
   const rowRef = useRef(null)
@@ -394,7 +507,7 @@ function SnippetRow({ snippet, list, dispatch, t }) {
   const isDragging = fromId === snippet.id
   const fromIdx = fromId ? list.findIndex(s => s.id === fromId) : -1
   const overIdx = overId ? list.findIndex(s => s.id === overId) : -1
-  const myIdx = list.findIndex(s => s.id === snippet.id)
+  const myIdx = index
   let shift = 0
   if (fromIdx >= 0 && overIdx >= 0 && myIdx >= 0 && !isDragging) {
     if (fromIdx < overIdx && myIdx > fromIdx && myIdx <= overIdx) shift = -1
@@ -405,6 +518,7 @@ function SnippetRow({ snippet, list, dispatch, t }) {
     style: {
       ...rowStyle,
       ...(hover ? rowHoverStyle : null),
+      ...(selected ? rowSelectedStyle : null),
       ...(isDragging && pointerDragging
         ? { opacity: 0.85, boxShadow: '0 8px 24px rgba(0,0,0,0.25)', zIndex: 10, position: 'relative' }
         : null),
@@ -424,35 +538,45 @@ function SnippetRow({ snippet, list, dispatch, t }) {
       if (!fromId) setHover(false)
     },
     children: [
-      jsx('span', { style: leadIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }),
+      jsx('span', { style: leadIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }, 'icon'),
       jsx(
         'button',
         {
           type: 'button',
-          onClick: () => dispatch({ type: 'insert', id: snippet.id }),
+          onClick: () => dispatch({ type: 'select', id: snippet.id }),
+          onDoubleClick: () => dispatch({ type: 'insert', id: snippet.id }),
           style: labelBtnStyle,
           children: jsxs('span', {
             style: rowBodyStyle,
             children: [
-              jsx('span', { style: rowLabelStyle, children: snippet.label }),
+              jsxs('span', {
+                style: rowLabelLineStyle,
+                children: [
+                  jsx('span', { style: rowLabelStyle, children: snippet.label }, 'label'),
+                  (snippet.tags || []).slice(0, 3).map(tag =>
+                    jsx('span', { style: tagChipStyle, children: tag }, tag)
+                  )
+                ]
+              }, 'line'),
               snippet.description
-                ? jsx('span', { style: rowDescStyle, children: snippet.description })
+                ? jsx('span', { style: rowDescStyle, children: snippet.description }, 'desc')
                 : null
             ]
           })
-        }
+        },
+        'body'
       ),
       jsx('span', {
-        style: { ...actionsWrapStyle, ...(hover ? actionsWrapHoverStyle : null) },
-        children: [
-          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.edit'), onClick: () => dispatch({ type: 'edit', id: snippet.id }), children: '✎' }),
-          jsx(Button, { variant: 'ghost', size: 'sm', style: actionBtnStyle, title: t('row.del'), onClick: () => dispatch({ type: 'delete', id: snippet.id }), children: '✕' })
-        ]
-      }),
-      jsx('span', {
-        style: dragHandleStyle,
+        style: canDrag ? dragHandleStyle : { ...dragHandleStyle, opacity: 0.3, cursor: 'default' },
         title: t('row.dragHint'),
         onPointerDown: e => {
+          // Reorder is identity-position based; while a filter hides rows the
+          // visual order no longer matches storage order, so the handle is
+          // inert (opacity below) instead of silently wrong.
+          if (!canDrag) {
+            e.preventDefault()
+            return
+          }
           // Pointer drag session, official drag-session.ts pattern: a
           // sub-threshold (4px) press is NOT a drag — capture/cursor/scroll
           // lock engage only after real movement. Engaging on pointerdown
@@ -499,7 +623,7 @@ function SnippetRow({ snippet, list, dispatch, t }) {
             row.style.transform = `translateY(${dy}px)`
             row.style.zIndex = '10'
             const steps = Math.round(dy / rowH)
-            const idx = list.findIndex(s => s.id === snippet.id)
+            const idx = myIdx
             const target = list[idx + steps]
             if (target && target.id !== lastOver) {
               lastOver = target.id
@@ -586,45 +710,178 @@ function SnippetRow({ snippet, list, dispatch, t }) {
 }
 
 function SnippetForm({ draft, onDraft, t }) {
+  // Field = label line + control; static arrays need explicit keys (React 19).
+  const field = (key, labelText, control) =>
+    jsxs('div', { style: { display: 'grid', gap: '4px' }, children: [
+      jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: labelText }, 'l'),
+      control
+    ] }, key)
   return jsxs('div', {
     style: { display: 'grid', gap: '10px', paddingTop: '4px' },
     children: [
-      jsx('div', {
-        style: { display: 'grid', gap: '4px' },
-        children: [
-          jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: t('manage.fieldLabel') }),
-          jsx(Input, {
-            value: draft.label,
-            onChange: e => onDraft({ ...draft, label: e.target.value }),
-            placeholder: t('manage.fieldLabelPh')
-          })
-        ]
-      }),
-      jsx('div', {
-        style: { display: 'grid', gap: '4px' },
-        children: [
-          jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: t('manage.fieldDesc') }),
-          jsx(Input, {
-            value: draft.description,
-            onChange: e => onDraft({ ...draft, description: e.target.value }),
-            placeholder: t('manage.fieldDescPh')
-          })
-        ]
-      }),
-      jsx('div', {
-        style: { display: 'grid', gap: '4px' },
-        children: [
-          jsx('div', { style: { fontSize: '12px', opacity: 0.7 }, children: t('manage.fieldText') }),
-          jsx(Textarea, {
-            value: draft.text,
-            rows: 6,
-            onChange: e => onDraft({ ...draft, text: e.target.value }),
-            placeholder: t('manage.fieldTextPh')
-          })
-        ]
-      })
+      field('label', t('manage.fieldLabel'), jsx(Input, {
+        value: draft.label,
+        onChange: e => onDraft({ ...draft, label: e.target.value }),
+        placeholder: t('manage.fieldLabelPh')
+      }, 'i')),
+      field('desc', t('manage.fieldDesc'), jsx(Input, {
+        value: draft.description,
+        onChange: e => onDraft({ ...draft, description: e.target.value }),
+        placeholder: t('manage.fieldDescPh')
+      }, 'i')),
+      field('tags', t('manage.fieldTags'), jsx(Input, {
+        value: draft.tags,
+        onChange: e => onDraft({ ...draft, tags: e.target.value }),
+        placeholder: t('manage.fieldTagsPh')
+      }, 'i')),
+      field('text', t('manage.fieldText'), jsx(Textarea, {
+        value: draft.text,
+        rows: 6,
+        onChange: e => onDraft({ ...draft, text: e.target.value }),
+        placeholder: t('manage.fieldTextPh')
+      }, 'i'))
     ]
   })
+}
+
+// ── Manage dialog: two-pane layout styles ─────────────────────────────────
+// Dialog shell carries `max-w-3xl` (compiled class, beats the built-in
+// max-w-lg through twMerge) and `max-h-[85vh]`; the body grid owns the scroll,
+// so the panes clamp to the shell with min-h-0 and scroll internally.
+
+const managerBodyStyle = {
+  display: 'flex',
+  gap: '12px',
+  minHeight: 0,
+  height: 'min(56vh, 520px)',
+  width: '100%'
+}
+
+const paneLeftStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '8px',
+  width: '260px',
+  flexShrink: 0,
+  minHeight: 0
+}
+
+const paneRightStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '8px',
+  flex: 1,
+  minWidth: 0,
+  minHeight: 0
+}
+
+const listScrollStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '4px',
+  flex: 1,
+  minHeight: 0,
+  overflowY: 'auto',
+  overflowX: 'hidden',
+  overscrollBehavior: 'contain',
+  paddingRight: '2px'
+}
+
+const rightScrollStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '8px',
+  flex: 1,
+  minHeight: 0,
+  overflowY: 'auto',
+  overscrollBehavior: 'contain'
+}
+
+// Tag-chip row above the list: filter affordance (click = toggle filter).
+const tagBarStyle = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '4px',
+  alignItems: 'center',
+  flexShrink: 0
+}
+
+const tagFilterChipStyle = {
+  cursor: 'pointer',
+  font: 'inherit',
+  borderRadius: 'calc(var(--radius-scalar) * 0.375rem)',
+  border: '1px solid var(--ui-stroke-tertiary)',
+  background: 'transparent',
+  color: 'var(--ui-text-tertiary)',
+  fontSize: '11px',
+  lineHeight: '16px',
+  padding: '0 6px',
+  maxWidth: '96px',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis'
+}
+
+const tagFilterChipActiveStyle = {
+  borderColor: 'var(--foreground)',
+  color: 'var(--foreground)',
+  background: 'var(--ui-control-hover-background)'
+}
+
+const detailHeadStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '4px',
+  minWidth: 0
+}
+
+const detailTitleStyle = {
+  fontSize: '15px',
+  fontWeight: 600,
+  color: 'var(--foreground)',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis'
+}
+
+const detailDescStyle = {
+  fontSize: 'var(--conversation-caption-font-size)',
+  color: 'var(--ui-text-tertiary)'
+}
+
+const contentBoxStyle = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: 'auto',
+  overscrollBehavior: 'contain',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+  fontSize: '13px',
+  lineHeight: 1.6,
+  padding: '10px 12px',
+  borderRadius: 'calc(var(--radius-scalar) * 0.625rem)',
+  border: '1px solid var(--ui-stroke-tertiary)',
+  background: 'var(--ui-bg-tertiary)',
+  color: 'var(--foreground)'
+}
+
+const placeholderBoxStyle = {
+  flex: 1,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minHeight: '160px',
+  borderRadius: 'calc(var(--radius-scalar) * 0.625rem)',
+  border: '1px dashed var(--ui-stroke-tertiary)',
+  fontSize: '13px',
+  color: 'var(--ui-text-tertiary)'
+}
+
+const toolbarRowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+  flexShrink: 0
 }
 
 // ── Quick picker (Cmd-K style: filter + ↑↓ + ↵) ───────────────────────────
@@ -1007,6 +1264,17 @@ function ManagerDialog() {
   const t = usePluginI18n(ID)
   const [list, setList] = useState([])
   const [editing, setEditing] = useState(null)
+  // Right-pane view state: 'preview' (read-only detail of `selectedId`),
+  // 'edit' (draft in `editing`), 'import' (paste-JSON box). The list in the
+  // left pane never disappears — the old full-page swap was the other half of
+  // the "out of control" complaint.
+  const [view, setView] = useState('preview')
+  const [selectedId, setSelectedId] = useState(null)
+  const [search, setSearch] = useState('')
+  const [tagFilter, setTagFilter] = useState(null)
+  // Two-click delete: first click arms, second (or timeout) commits.
+  const [pendingDel, setPendingDel] = useState(null)
+  const [importText, setImportText] = useState('')
   const [wasOpen, setWasOpen] = useState(false)
   // Which chat surface THIS dialog instance lives in. The underside slot
   // renders inside each session's composer dock, so the DOM ancestor chain
@@ -1034,6 +1302,12 @@ function ManagerDialog() {
     setWasOpen(true)
     setList(loadSnippets())
     setEditing(null)
+    setView('preview')
+    setSelectedId(null)
+    setSearch('')
+    setTagFilter(null)
+    setPendingDel(null)
+    setImportText('')
   } else if (!open && wasOpen) {
     setWasOpen(false)
   }
@@ -1105,23 +1379,107 @@ function ManagerDialog() {
     saveSnippets(next)
   }
 
+  function openEdit(sn) {
+    setEditing({
+      id: sn.id,
+      label: sn.label,
+      description: sn.description || '',
+      text: sn.text,
+      tags: (sn.tags || []).join(', ')
+    })
+    setView('edit')
+    setPendingDel(null)
+  }
+
+  function insertSnippet(sn) {
+    if (insertIntoComposer(sn.text)) return
+    host.notify({ kind: 'error', message: t('notify.insertFailed') })
+  }
+
+  function exportAll() {
+    if (list.length === 0) {
+      host.notify({ kind: 'info', message: t('notify.exportEmpty') })
+      return
+    }
+    const json = JSON.stringify(list, null, 2)
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = json
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        const ok = document.execCommand('copy')
+        ta.remove()
+        if (ok) host.notify({ kind: 'success', message: t('notify.exportDone') })
+        else host.notify({ kind: 'warning', message: t('notify.exportFailed') })
+      } catch {
+        host.notify({ kind: 'warning', message: t('notify.exportFailed') })
+      }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(json).then(
+        () => host.notify({ kind: 'success', message: t('notify.exportDone') }),
+        fallback
+      )
+    } else {
+      fallback()
+    }
+  }
+
+  function importFrom(text) {
+    let parsed
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      parsed = null
+    }
+    if (!Array.isArray(parsed)) {
+      host.notify({ kind: 'error', message: t('notify.importBad') })
+      return
+    }
+    const { list: merged, added } = mergeSnippets(list, parsed)
+    if (added === 0) {
+      host.notify({ kind: 'info', message: t('notify.importNone') })
+    } else {
+      commit(merged)
+      host.notify({ kind: 'success', message: `${t('notify.importDone')} ${added} ${t('notify.importUnit')}` })
+    }
+    setView('preview')
+  }
+
   function dispatch(action) {
     if (action.type === 'insert') {
       const sn = list.find(s => s.id === action.id)
-      if (sn && insertIntoComposer(sn.text)) {
-        return
-      }
-      host.notify({ kind: 'error', message: t('notify.insertFailed') })
+      if (sn) insertSnippet(sn)
+      return
+    }
+    if (action.type === 'select') {
+      setSelectedId(action.id)
+      setView('preview')
+      setPendingDel(null)
       return
     }
     if (action.type === 'edit') {
       const sn = list.find(s => s.id === action.id)
       if (!sn) return
-      setEditing({ id: sn.id, label: sn.label, description: sn.description || '', text: sn.text })
+      setSelectedId(sn.id)
+      openEdit(sn)
       return
     }
     if (action.type === 'delete') {
-      commit(removeSnippet(list, action.id))
+      const next = removeSnippet(list, action.id)
+      commit(next)
+      if (selectedId === action.id) {
+        setSelectedId(null)
+        setView('preview')
+      }
+      setPendingDel(null)
+      return
+    }
+    if (action.type === 'arm-delete') {
+      setPendingDel(pendingDel === action.id ? null : action.id)
       return
     }
     if (action.type === 'move') {
@@ -1137,17 +1495,52 @@ function ManagerDialog() {
     const clean = {
       label: editing.label.trim(),
       description: editing.description.trim(),
-      text: editing.text
+      text: editing.text,
+      tags: editing.tags
     }
+    let savedId = editing.id
     if (editing.id) {
       commit(updateSnippet(list, editing.id, clean))
     } else {
-      commit(addSnippet(list, clean))
+      const next = addSnippet(list, clean)
+      savedId = next[next.length - 1].id
+      commit(next)
     }
+    setSelectedId(savedId)
     setEditing(null)
+    setView('preview')
   }
 
   const draftValid = editing && editing.label.trim() !== '' && editing.text.trim() !== ''
+
+  // Derived view state. Search + tag filter both apply; drag is only sound on
+  // the unfiltered list (visual order must equal storage order), so the ⠿
+  // handle goes inert while a filter is active.
+  const q = search.trim().toLowerCase()
+  const filtered = list.filter(sn => {
+    if (tagFilter && !(sn.tags || []).includes(tagFilter)) return false
+    if (!q) return true
+    return (
+      sn.label.toLowerCase().includes(q) ||
+      (sn.description || '').toLowerCase().includes(q) ||
+      (sn.tags || []).some(tag => tag.toLowerCase().includes(q))
+    )
+  })
+  const dragEnabled = q === '' && tagFilter === null
+  const allTags = (() => {
+    const seen = new Set()
+    const out = []
+    for (const sn of list) {
+      for (const tag of sn.tags || []) {
+        if (!seen.has(tag)) {
+          seen.add(tag)
+          out.push(tag)
+        }
+      }
+    }
+    return out
+  })()
+  const selected = list.find(s => s.id === selectedId) || null
 
   // Probe div ALWAYS renders (it is what resolves myTarget); the Dialog only
   // mounts in the instance whose surface matches the open-time snapshot.
@@ -1171,57 +1564,234 @@ function ManagerDialog() {
     },
     children: jsx(DialogContent, {
       className: DIALOG_MAX_W,
-      children:
-        editing === null
-          ? jsxs('div', {
-              children: [
-                jsxs(DialogHeader, {
-                  children: [
-                    jsx(DialogTitle, { children: t('manage.title') }),
-                    jsx(DialogDescription, { children: t('manage.desc') })
-                  ]
-                }),
-                jsx('div', {
-                  style: { display: 'grid', gap: '4px', marginTop: '2px' },
-                  children:
-                    list.length === 0
-                      ? jsx('div', {
-                          style: { padding: '12px 0', textAlign: 'center', fontSize: '13px', opacity: 0.6 },
-                          children: t('manage.empty')
+      children: jsxs('div', {
+        children: [
+          jsxs(DialogHeader, {
+            children: [
+              jsx(DialogTitle, { children: t('manage.title') }, 'title'),
+              jsx(DialogDescription, { children: t('manage.desc') }, 'desc')
+            ]
+          }),
+          jsx('div', {
+            style: managerBodyStyle,
+            children: [
+              // ── Left pane: search + tag filter + compact list + tools ──
+              jsxs('div', {
+                style: paneLeftStyle,
+                children: [
+                  jsx(Input, {
+                    value: search,
+                    onChange: e => setSearch(e.target.value),
+                    placeholder: t('manage.searchPh')
+                  }, 'search'),
+                  allTags.length > 0
+                    ? jsx('div', {
+                        style: tagBarStyle,
+                        children: allTags.map(tag =>
+                          jsx('button', {
+                            type: 'button',
+                            style: {
+                              ...tagFilterChipStyle,
+                              ...(tagFilter === tag ? tagFilterChipActiveStyle : null)
+                            },
+                            onClick: () => setTagFilter(tagFilter === tag ? null : tag),
+                            children: tag
+                          }, tag)
+                        )
+                      }, 'tags')
+                    : null,
+                  jsx('div', {
+                    style: listScrollStyle,
+                    children:
+                      list.length === 0
+                        ? jsx('div', {
+                            style: { padding: '12px 0', textAlign: 'center', fontSize: '13px', opacity: 0.6 },
+                            children: t('manage.empty')
+                          })
+                        : filtered.length === 0
+                          ? jsx('div', {
+                              style: { padding: '12px 0', textAlign: 'center', fontSize: '13px', opacity: 0.6 },
+                              children: t('manage.noMatch')
+                            })
+                          : filtered.map((sn, i) =>
+                              jsx(SnippetRow, {
+                                snippet: sn,
+                                list: filtered,
+                                index: i,
+                                dispatch,
+                                t,
+                                selected: sn.id === selectedId,
+                                canDrag: dragEnabled
+                              }, sn.id)
+                            )
+                  }, 'list'),
+                  jsxs('div', {
+                    style: toolbarRowStyle,
+                    children: [
+                      jsx(Button, {
+                        variant: 'outline',
+                        size: 'sm',
+                        onClick: () => {
+                          setEditing({ id: null, label: '', description: '', text: '', tags: '' })
+                          setView('edit')
+                          setSelectedId(null)
+                        },
+                        children: t('manage.add')
+                      }, 'add'),
+                      jsx(Button, {
+                        variant: 'ghost',
+                        size: 'sm',
+                        onClick: () => {
+                          setImportText('')
+                          setView('import')
+                        },
+                        children: t('manage.import')
+                      }, 'import'),
+                      jsx(Button, {
+                        variant: 'ghost',
+                        size: 'sm',
+                        onClick: exportAll,
+                        children: t('manage.export')
+                      }, 'export'),
+                      jsx(Button, {
+                        variant: 'ghost',
+                        size: 'sm',
+                        onClick: () => $managerOpen.set(false),
+                        children: t('manage.done')
+                      }, 'done')
+                    ]
+                  })
+                ]
+              }, 'left'),
+              // ── Right pane: preview / edit / import ──
+              view === 'edit'
+                ? jsxs('div', {
+                    style: paneRightStyle,
+                    children: [
+                      jsx(DialogTitle, { children: editing.id ? t('manage.editTitle') : t('manage.addTitle') }, 'h'),
+                      jsx(DialogDescription, { children: t('manage.formDesc') }, 'd'),
+                      jsx('div', {
+                        style: rightScrollStyle,
+                        children: jsx(SnippetForm, { draft: editing, onDraft: setEditing, t })
+                      }, 'form'),
+                      jsxs('div', {
+                        style: { ...toolbarRowStyle, justifyContent: 'flex-end' },
+                        children: [
+                          jsx(Button, {
+                            variant: 'outline',
+                            size: 'sm',
+                            onClick: () => {
+                              setEditing(null)
+                              setView('preview')
+                            },
+                            children: t('manage.cancel')
+                          }, 'cancel'),
+                          jsx(Button, { size: 'sm', onClick: saveDraft, disabled: !draftValid, children: t('manage.save') }, 'save')
+                        ]
+                      })
+                    ]
+                  }, 'edit')
+                : view === 'import'
+                  ? jsxs('div', {
+                      style: paneRightStyle,
+                      children: [
+                        jsx(DialogDescription, { children: t('manage.importTitle') }, 'h'),
+                        jsx(Textarea, {
+                          value: importText,
+                          onChange: e => setImportText(e.target.value),
+                          placeholder: t('manage.importPh'),
+                          style: { ...contentBoxStyle, flex: 1, resize: 'none' }
+                        }, 'box'),
+                        jsxs('div', {
+                          style: { ...toolbarRowStyle, justifyContent: 'flex-end' },
+                          children: [
+                            jsx(Button, {
+                              variant: 'outline',
+                              size: 'sm',
+                              onClick: () => setView('preview'),
+                              children: t('manage.cancel')
+                            }, 'cancel'),
+                            jsx(Button, {
+                              size: 'sm',
+                              disabled: importText.trim() === '',
+                              onClick: () => importFrom(importText),
+                              children: t('manage.importMerge')
+                            }, 'merge')
+                          ]
                         })
-                      : list.map(sn => jsx(SnippetRow, { snippet: sn, list, dispatch, t }, sn.id))
-                }),
-                jsxs(DialogFooter, {
-                  style: { marginTop: '8px' },
-                  children: [
-                    jsx(Button, {
-                      variant: 'outline',
-                      size: 'sm',
-                      onClick: () => setEditing({ id: null, label: '', description: '', text: '' }),
-                      children: t('manage.add')
-                    }),
-                    jsx(Button, { variant: 'ghost', size: 'sm', onClick: () => $managerOpen.set(false), children: t('manage.done') })
-                  ]
-                })
-              ]
-            })
-          : jsxs('div', {
-              children: [
-                jsxs(DialogHeader, {
-                  children: [
-                    jsx(DialogTitle, { children: editing.id ? t('manage.editTitle') : t('manage.addTitle') }),
-                    jsx(DialogDescription, { children: t('manage.formDesc') })
-                  ]
-                }),
-                jsx(SnippetForm, { draft: editing, onDraft: setEditing, t }),
-                jsxs(DialogFooter, {
-                  children: [
-                    jsx(Button, { variant: 'outline', size: 'sm', onClick: () => setEditing(null), children: t('manage.cancel') }),
-                    jsx(Button, { size: 'sm', onClick: saveDraft, disabled: !draftValid, children: t('manage.save') })
-                  ]
-                })
-              ]
-            })
+                      ]
+                    }, 'import')
+                  : selected
+                    ? jsxs('div', {
+                        style: paneRightStyle,
+                        children: [
+                          jsxs('div', {
+                            style: toolbarRowStyle,
+                            children: [
+                              jsx('span', {
+                                style: { fontSize: '12px', color: 'var(--ui-text-tertiary)', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' },
+                                children: t('manage.preview')
+                              }),
+                              jsx('span', { style: { flex: 1 } }),
+                              jsx(Button, {
+                                variant: 'outline',
+                                size: 'sm',
+                                onClick: () => openEdit(selected),
+                                children: t('manage.edit')
+                              }),
+                              jsx(Button, {
+                                variant: pendingDel === selected.id ? 'destructive' : 'ghost',
+                                size: 'sm',
+                                onClick: () =>
+                                  dispatch({ type: pendingDel === selected.id ? 'delete' : 'arm-delete', id: selected.id }),
+                                children: pendingDel === selected.id ? t('manage.confirmDel') : t('manage.del')
+                              })
+                            ]
+                          }),
+                          jsxs('div', {
+                            style: detailHeadStyle,
+                            children: [
+                              jsx('div', { style: detailTitleStyle, children: selected.label }),
+                              selected.description
+                                ? jsx('div', { style: detailDescStyle, children: selected.description })
+                                : null,
+                              (selected.tags || []).length > 0
+                                ? jsx('div', {
+                                    style: tagBarStyle,
+                                    children: (selected.tags || []).map(tag =>
+                                      jsx('span', { style: tagChipStyle, children: tag }, tag)
+                                    )
+                                  })
+                                : null
+                            ]
+                          }),
+                          jsxs('div', {
+                            style: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '4px' },
+                            children: [
+                              jsx('div', {
+                                style: { fontSize: '12px', opacity: 0.7, flexShrink: 0 },
+                                children: t('manage.content')
+                              }),
+                              jsx('div', {
+                                style: { ...contentBoxStyle, background: 'transparent' },
+                                children: selected.text
+                              })
+                            ]
+                          }),
+                          jsx(Button, {
+                            variant: 'secondary',
+                            size: 'sm',
+                            style: { width: '100%', flexShrink: 0 },
+                            onClick: () => insertSnippet(selected),
+                            children: t('manage.insert')
+                          })
+                        ]
+                      }, 'detail')
+                    : jsx('div', { style: placeholderBoxStyle, children: t('manage.placeholder') }, 'empty')
+            ]
+          })
+        ]
+      })
       })
     }) : null
   })
