@@ -14,7 +14,7 @@
  *   - insertCtx is captured fresh on every menu-row click (run), so the dialog
  *     always inserts through a closure from the current composer render.
  */
-import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
+import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Codicon, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useRef, useState } from 'react'
 
@@ -31,9 +31,9 @@ const LOCALES = {
     manage: {
       title: 'My Snippets',
       desc: 'Select a snippet on the left to preview and edit; insert with the button or double-click a row. Drag ⠿ to reorder (paused while filtering).',
-      add: 'Add', done: 'Done', empty: 'No snippets yet — click "Add" below to create one',
+      add: 'Add', empty: 'No snippets yet — click "Add" to create one',
       noMatch: 'No matching snippets',
-      searchPh: 'Search by name or description…',
+      searchPh: 'Search by name or description…', searchClear: 'Clear',
       editTitle: 'Edit Snippet', addTitle: 'New Snippet',
       formDesc: 'Label and content are required.',
       fieldLabel: 'Label *', fieldLabelPh: 'e.g. Code review',
@@ -42,11 +42,11 @@ const LOCALES = {
       fieldText: 'Content *', fieldTextPh: 'The full prompt inserted into the composer…',
       cancel: 'Cancel', save: 'Save',
       placeholder: 'Select a snippet on the left',
-      content: 'Content', insert: 'Insert', edit: 'Edit', del: 'Delete',
+      metaName: 'name', metaDesc: 'description', metaTags: 'tags',
+      insert: 'Insert', edit: 'Edit', del: 'Delete',
       confirmDel: 'Click again to delete',
       import: 'Import', export: 'Export',
-      importTitle: 'Import snippets', importPh: 'Paste an exported JSON array…', importMerge: 'Merge',
-      preview: 'Preview — switch to Edit to change it'
+      importTitle: 'Import snippets', importPh: 'Paste an exported JSON array…', importMerge: 'Merge'
     },
     quick: {
       filterPh: 'Type to filter, ↑↓ to move, ↵ to insert, Esc to close',
@@ -65,9 +65,9 @@ const LOCALES = {
     manage: {
       title: '我的片段',
       desc: '左侧点选片段进行预览和编辑；点「插入」按钮或双击行插入。按住 ⠿ 拖动排序（搜索时暂停）。',
-      add: '新增', done: '完成', empty: '还没有片段，点下方「新增」加一条',
+      add: '新增', empty: '还没有片段，点下方「新增」加一条',
       noMatch: '没有匹配的片段',
-      searchPh: '按名称或描述搜索…',
+      searchPh: '按名称或描述搜索…', searchClear: '清除',
       editTitle: '编辑片段', addTitle: '新增片段',
       formDesc: '名称和内容必填。',
       fieldLabel: '名称 *', fieldLabelPh: '如：代码审查',
@@ -76,11 +76,11 @@ const LOCALES = {
       fieldText: '内容 *', fieldTextPh: '点选后插入输入框的完整提示词…',
       cancel: '取消', save: '保存',
       placeholder: '在左侧选择一个片段',
-      content: '内容', insert: '插入', edit: '编辑', del: '删除',
+      metaName: '名称', metaDesc: '描述', metaTags: '标签',
+      insert: '插入', edit: '编辑', del: '删除',
       confirmDel: '再点一次确认删除',
       import: '导入', export: '导出',
-      importTitle: '导入片段', importPh: '粘贴导出的 JSON 数组…', importMerge: '合并导入',
-      preview: '预览模式 — 点「编辑」修改'
+      importTitle: '导入片段', importPh: '粘贴导出的 JSON 数组…', importMerge: '合并导入'
     },
     quick: {
       filterPh: '输入过滤，↑↓ 选择，↵ 插入，Esc 关闭',
@@ -99,9 +99,9 @@ const LOCALES = {
     manage: {
       title: '我的片段',
       desc: '左側點選片段進行預覽和編輯；點「插入」按鈕或雙擊行插入。按住 ⠿ 拖動排序（搜尋時暫停）。',
-      add: '新增', done: '完成', empty: '還沒有片段，點下方「新增」加一條',
+      add: '新增', empty: '還沒有片段，點下方「新增」加一條',
       noMatch: '沒有符合的片段',
-      searchPh: '按名稱或描述搜尋…',
+      searchPh: '按名稱或描述搜尋…', searchClear: '清除',
       editTitle: '編輯片段', addTitle: '新增片段',
       formDesc: '名稱和內容必填。',
       fieldLabel: '名稱 *', fieldLabelPh: '如：代碼審查',
@@ -110,11 +110,11 @@ const LOCALES = {
       fieldText: '內容 *', fieldTextPh: '點選後插入輸入框的完整提示詞…',
       cancel: '取消', save: '儲存',
       placeholder: '在左側選擇一個片段',
-      content: '內容', insert: '插入', edit: '編輯', del: '刪除',
+      metaName: '名稱', metaDesc: '描述', metaTags: '標籤',
+      insert: '插入', edit: '編輯', del: '刪除',
       confirmDel: '再點一次確認刪除',
       import: '匯入', export: '匯出',
-      importTitle: '匯入片段', importPh: '貼上匯出的 JSON 陣列…', importMerge: '合併匯入',
-      preview: '預覽模式 — 點「編輯」修改'
+      importTitle: '匯入片段', importPh: '貼上匯出的 JSON 陣列…', importMerge: '合併匯入'
     },
     quick: {
       filterPh: '輸入過濾，↑↓ 選擇，↵ 插入，Esc 關閉',
@@ -380,39 +380,28 @@ function saveSnippets(list) {
 
 // Official row geometry, inlined (verified-dead classes: px-2.5, gap-2.5,
 // size-3.5, mt-0.5 are NOT in dist/assets/index-*.css).
+// Official CapRow geometry (master-detail.tsx): NO border at all — fixed
+// height (h-11 with subtitle / h-8 bare), pl-2 pr-1.5, rounded-md, and pure
+// background fill: hover --ui-row-hover-background, active --ui-row-active-
+// background (the same var the skills rail uses for the selected row).
 const rowStyle = {
   display: 'flex',
   width: '100%',
   cursor: 'pointer',
-  alignItems: 'flex-start',
-  gap: '10px', // gap-2.5
-  borderRadius: 'calc(var(--radius-scalar) * 0.625rem)', // rounded-md (official compile output)
-  // Longhands, not the `border` shorthand: selected/hover states override
-  // borderColor, and React breaks the remove-on-rerender when a shorthand
-  // and a longhand for the same property are mixed.
-  borderWidth: '1px',
-  borderStyle: 'solid',
-  borderColor: 'transparent',
-  padding: '8px 10px', // px-2.5 py-2
+  alignItems: 'center',
+  gap: '8px', // gap-2
+  borderRadius: 'calc(var(--radius-scalar) * 0.625rem)', // rounded-md
+  padding: '0 6px 0 8px', // pr-1.5 pl-2
   textAlign: 'left',
-  transition: 'color 150ms, background-color 150ms, border-color 150ms',
+  transition: 'color 100ms ease-out, background-color 100ms ease-out',
   background: 'transparent',
   font: 'inherit',
-  color: 'inherit'
+  color: 'var(--ui-text-secondary)'
 }
 
-// Hover only fills the background — no stroke. The base border stays
-// transparent; lighting it up on hover read as "an extra border appeared".
 const rowHoverStyle = {
-  background: 'var(--ui-control-hover-background)'
-}
-
-const leadIconStyle = {
-  marginTop: '2px', // mt-0.5
-  width: '14px', // size-3.5
-  height: '14px',
-  flexShrink: 0,
-  color: 'var(--ui-text-tertiary)'
+  background: 'var(--ui-row-hover-background)',
+  transition: 'none'
 }
 
 const rowBodyStyle = {
@@ -422,18 +411,18 @@ const rowBodyStyle = {
   flex: 1
 }
 
-// Label line = name + tag chips, one flex row, hard-clamped to one line.
+// CapRow title line: 0.78rem medium + shrink-0 chips (subtitle pattern).
 const rowLabelLineStyle = {
   display: 'flex',
   alignItems: 'center',
-  gap: '6px',
+  gap: '4px', // gap-1
   minWidth: 0
 }
 
 const rowLabelStyle = {
-  fontSize: '14px',
+  fontSize: '0.78rem',
   fontWeight: 500,
-  color: 'var(--foreground)',
+  color: 'color-mix(in srgb, var(--foreground) 85%, transparent)',
   minWidth: 0,
   flexShrink: 1,
   overflow: 'hidden',
@@ -441,34 +430,35 @@ const rowLabelStyle = {
   textOverflow: 'ellipsis'
 }
 
-// Tag chip: tertiary-outline pill, tiny, non-interactive.
+// Tag chip: the official meta-badge skin (CapRow: bg-quinary rounded px-1).
 const tagChipStyle = {
   flexShrink: 0,
   maxWidth: '72px',
   overflow: 'hidden',
   whiteSpace: 'nowrap',
   textOverflow: 'ellipsis',
-  fontSize: '10px',
+  fontSize: '0.6rem',
   lineHeight: '14px',
-  padding: '0 5px',
-  borderRadius: 'calc(var(--radius-scalar) * 0.375rem)',
-  border: '1px solid var(--ui-stroke-tertiary)',
+  padding: '1px 4px',
+  borderRadius: 'calc(var(--radius-scalar) * 0.25rem)',
+  background: 'var(--ui-bg-quinary)',
   color: 'var(--ui-text-tertiary)'
 }
 
 // One line, always. Wrapping descriptions were the height blow-out.
 const rowDescStyle = {
-  fontSize: 'var(--conversation-caption-font-size)',
-  color: 'var(--ui-text-tertiary)',
+  fontSize: '0.62rem',
+  color: 'color-mix(in srgb, var(--foreground) 50%, transparent)',
   overflow: 'hidden',
   whiteSpace: 'nowrap',
   textOverflow: 'ellipsis'
 }
 
+// Selected = the skills rail's active row: pure background fill, no chrome.
 const rowSelectedStyle = {
-  borderColor: 'var(--ui-stroke-tertiary)',
-  background: 'var(--ui-control-hover-background)',
-  boxShadow: 'inset 2px 0 0 var(--foreground)'
+  background: 'var(--ui-row-active-background)',
+  color: 'var(--foreground)',
+  transition: 'none'
 }
 
 const labelBtnStyle = {
@@ -519,10 +509,12 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
     if (fromIdx < overIdx && myIdx > fromIdx && myIdx <= overIdx) shift = -1
     else if (fromIdx > overIdx && myIdx >= overIdx && myIdx < fromIdx) shift = 1
   }
+  const hasSub = !!(snippet.description || (snippet.tags || []).length > 0)
   return jsxs('div', {
     ref: rowRef,
     style: {
       ...rowStyle,
+      height: hasSub ? '44px' : '32px', // h-11 / h-8
       ...(hover ? rowHoverStyle : null),
       ...(selected ? rowSelectedStyle : null),
       ...(isDragging && pointerDragging
@@ -544,7 +536,6 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
       if (!fromId) setHover(false)
     },
     children: [
-      jsx('span', { style: leadIconStyle, 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: MESSAGE_SQUARE_SVG } }, 'icon'),
       jsx(
         'button',
         {
@@ -555,17 +546,19 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
           children: jsxs('span', {
             style: rowBodyStyle,
             children: [
-              jsxs('span', {
-                style: rowLabelLineStyle,
-                children: [
-                  jsx('span', { style: rowLabelStyle, children: snippet.label }, 'label'),
-                  (snippet.tags || []).slice(0, 3).map(tag =>
-                    jsx('span', { style: tagChipStyle, children: tag }, tag)
-                  )
-                ]
-              }, 'line'),
-              snippet.description
-                ? jsx('span', { style: rowDescStyle, children: snippet.description }, 'desc')
+              jsx('span', { style: rowLabelStyle, children: snippet.label }, 'label'),
+              hasSub
+                ? jsxs('span', {
+                    style: rowLabelLineStyle,
+                    children: [
+                      snippet.description
+                        ? jsx('span', { style: rowDescStyle, children: snippet.description }, 'desc')
+                        : null,
+                      (snippet.tags || []).slice(0, 3).map(tag =>
+                        jsx('span', { style: tagChipStyle, children: tag }, tag)
+                      )
+                    ]
+                  }, 'sub')
                 : null
             ]
           })
@@ -834,41 +827,95 @@ const tagFilterChipActiveStyle = {
   background: 'var(--ui-control-hover-background)'
 }
 
-const detailHeadStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '4px',
+// ── Official detail-pane language (skill-detail.tsx, verbatim geometry) ──
+// Meta card = `grid gap-1 rounded-lg border border-(--ui-stroke-tertiary)
+// bg-(--ui-bg-quinary) p-3` with `flex gap-2 text-[0.68rem] leading-4` rows:
+// key = `w-24 shrink-0 font-medium text-(--ui-text-tertiary)`,
+// value = `min-w-0 whitespace-pre-wrap break-words text-(--ui-text-secondary)`.
+const metaCardStyle = {
+  display: 'grid',
+  gap: '4px', // gap-1
+  borderRadius: 'calc(var(--radius-scalar) * 0.75rem)', // rounded-lg (.75rem verified in dist)
+  border: '1px solid var(--ui-stroke-tertiary)',
+  background: 'var(--ui-bg-quinary)',
+  padding: '12px', // p-3
+  flexShrink: 0,
   minWidth: 0
 }
 
-const detailTitleStyle = {
-  fontSize: '15px',
-  fontWeight: 600,
-  color: 'var(--foreground)',
-  overflow: 'hidden',
-  whiteSpace: 'nowrap',
-  textOverflow: 'ellipsis'
+const metaRowStyle = {
+  display: 'flex',
+  gap: '8px', // gap-2
+  fontSize: '0.68rem',
+  lineHeight: '16px' // leading-4
 }
 
-const detailDescStyle = {
-  fontSize: 'var(--conversation-caption-font-size)',
+const metaKeyStyle = {
+  width: '96px', // w-24
+  flexShrink: 0,
+  fontWeight: 500,
   color: 'var(--ui-text-tertiary)'
 }
 
-const contentBoxStyle = {
+const metaValStyle = {
+  minWidth: 0,
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'break-word', // break-words
+  color: 'var(--ui-text-secondary)'
+}
+
+// Content = the official <pre> card: same skin, mono, internal scroll.
+const preCardStyle = {
   flex: 1,
   minHeight: 0,
   overflowY: 'auto',
   overscrollBehavior: 'contain',
   whiteSpace: 'pre-wrap',
-  wordBreak: 'break-word',
-  fontSize: '13px',
-  lineHeight: 1.6,
-  padding: '10px 12px',
-  borderRadius: 'calc(var(--radius-scalar) * 0.625rem)',
+  overflowWrap: 'break-word',
+  borderRadius: 'calc(var(--radius-scalar) * 0.75rem)',
   border: '1px solid var(--ui-stroke-tertiary)',
-  background: 'var(--ui-bg-tertiary)',
-  color: 'var(--foreground)'
+  background: 'var(--ui-bg-quinary)',
+  padding: '12px',
+  fontFamily: 'var(--dt-font-mono)', // .font-mono compiles to this var
+  fontSize: '0.68rem',
+  lineHeight: 1.625 // leading-relaxed
+}
+
+// DetailHeader title (h3 text-[0.9375rem] font-semibold tracking-tight) +
+// PanelPill tags (rounded-full px-1.5 py-0.5 text-[0.62rem] muted tone).
+const detailTitleLineStyle = {
+  display: 'flex',
+  minHeight: '24px',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: '8px'
+}
+
+const detailTitleStyle = {
+  minWidth: 0,
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
+  textOverflow: 'ellipsis',
+  fontSize: '0.9375rem',
+  fontWeight: 600,
+  letterSpacing: '-0.01em'
+}
+
+const pillStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  borderRadius: '9999px',
+  padding: '2px 6px',
+  fontSize: '0.62rem',
+  fontWeight: 500,
+  background: 'color-mix(in srgb, var(--foreground) 10%, transparent)', // bg-foreground/10
+  color: 'var(--ui-text-secondary)' // text-muted-foreground ≈ secondary
+}
+
+const detailDescStyle = {
+  marginTop: '4px',
+  fontSize: 'var(--conversation-caption-font-size)',
+  color: 'var(--ui-text-tertiary)'
 }
 
 const placeholderBoxStyle = {
@@ -877,10 +924,38 @@ const placeholderBoxStyle = {
   alignItems: 'center',
   justifyContent: 'center',
   minHeight: '160px',
-  borderRadius: 'calc(var(--radius-scalar) * 0.625rem)',
-  border: '1px dashed var(--ui-stroke-tertiary)',
-  fontSize: '13px',
-  color: 'var(--ui-text-tertiary)'
+  fontSize: '0.78rem',
+  color: 'var(--ui-text-quaternary)'
+}
+
+// ── SearchField (components/ui/search-field.tsx, borderless until focus) ──
+const searchRowStyle = {
+  display: 'inline-flex',
+  minWidth: 0,
+  maxWidth: '100%',
+  alignItems: 'center',
+  gap: '6px', // gap-1.5
+  borderBottom: '1px solid transparent',
+  padding: '0 2px', // px-0.5
+  transition: 'color 150ms, border-color 150ms, opacity 150ms'
+}
+
+const searchRowActiveStyle = {
+  borderBottomColor: 'var(--ui-stroke-tertiary)'
+}
+
+const searchInputStyle = {
+  height: '28px', // h-7
+  minWidth: 0,
+  maxWidth: '100%',
+  flex: 1,
+  background: 'transparent',
+  border: 'none',
+  outline: 'none',
+  padding: 0,
+  font: 'inherit',
+  fontSize: '12px', // text-xs
+  color: 'var(--foreground)'
 }
 
 const toolbarRowStyle = {
@@ -1277,6 +1352,7 @@ function ManagerDialog() {
   const [view, setView] = useState('preview')
   const [selectedId, setSelectedId] = useState(null)
   const [search, setSearch] = useState('')
+  const [searchFocused, setSearchFocused] = useState(false)
   const [tagFilter, setTagFilter] = useState(null)
   // Two-click delete: first click arms, second (or timeout) commits.
   const [pendingDel, setPendingDel] = useState(null)
@@ -1579,10 +1655,47 @@ function ManagerDialog() {
       onOpenAutoFocus: e => e.preventDefault(),
       children: jsxs('div', {
         children: [
-          jsxs(DialogHeader, {
+          jsxs('div', {
+            style: { display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 },
             children: [
-              jsx(DialogTitle, { children: t('manage.title') }, 'title'),
-              jsx(DialogDescription, { children: t('manage.desc') }, 'desc')
+              jsxs(DialogHeader, {
+                style: { flex: 1, minWidth: 0, textAlign: 'left' },
+                children: [
+                  jsx(DialogTitle, { children: t('manage.title') }, 'title'),
+                  jsx(DialogDescription, { children: t('manage.desc') }, 'desc')
+                ]
+              }, 'head'),
+              // SearchField clone (search-field.tsx): borderless, recedes to
+              // 30% until touched, underline on focus — pinned header-right
+              // like PageSearchShell's header row.
+              jsx('div', {
+                style: {
+                  ...searchRowStyle,
+                  maxWidth: '260px',
+                  opacity: search || searchFocused ? 1 : 0.3,
+                  ...(searchFocused ? { opacity: 1 } : null)
+                },
+                onFocus: () => setSearchFocused(true),
+                onBlur: () => setSearchFocused(false),
+                children: [
+                  jsx(Codicon, { name: 'search', size: '0.875rem', style: { flexShrink: 0, color: 'var(--ui-text-tertiary)' } }, 'i'),
+                  jsx('input', {
+                    style: searchInputStyle,
+                    value: search,
+                    placeholder: t('manage.searchPh'),
+                    onChange: e => setSearch(e.target.value)
+                  }, 'in'),
+                  search
+                    ? jsx('button', {
+                        type: 'button',
+                        title: t('manage.searchClear'),
+                        onClick: () => setSearch(''),
+                        style: { background: 'transparent', border: 'none', padding: '2px', cursor: 'pointer', color: 'var(--ui-text-tertiary)', display: 'inline-flex', flexShrink: 0 },
+                        children: jsx(Codicon, { name: 'close', size: '0.875rem' })
+                      }, 'clear')
+                    : null
+                ]
+              }, 'search')
             ]
           }),
           jsx('div', {
@@ -1592,11 +1705,6 @@ function ManagerDialog() {
               jsxs('div', {
                 style: paneLeftStyle,
                 children: [
-                  jsx(Input, {
-                    value: search,
-                    onChange: e => setSearch(e.target.value),
-                    placeholder: t('manage.searchPh')
-                  }, 'search'),
                   allTags.length > 0
                     ? jsx('div', {
                         style: tagBarStyle,
@@ -1665,13 +1773,7 @@ function ManagerDialog() {
                         size: 'sm',
                         onClick: exportAll,
                         children: t('manage.export')
-                      }, 'export'),
-                      jsx(Button, {
-                        variant: 'ghost',
-                        size: 'sm',
-                        onClick: () => $managerOpen.set(false),
-                        children: t('manage.done')
-                      }, 'done')
+                      }, 'export')
                     ]
                   })
                 ]
@@ -1713,7 +1815,7 @@ function ManagerDialog() {
                           value: importText,
                           onChange: e => setImportText(e.target.value),
                           placeholder: t('manage.importPh'),
-                          style: { ...contentBoxStyle, flex: 1, resize: 'none' }
+                          style: { ...preCardStyle, resize: 'none', fontFamily: 'inherit', color: 'var(--foreground)' }
                         }, 'box'),
                         jsxs('div', {
                           style: { ...toolbarRowStyle, justifyContent: 'flex-end' },
@@ -1738,66 +1840,89 @@ function ManagerDialog() {
                     ? jsxs('div', {
                         style: paneRightStyle,
                         children: [
-                          jsxs('div', {
-                            style: toolbarRowStyle,
+                          // DetailHeader (primitives.tsx): title 0.9375rem
+                          // semibold + PanelPill tags + caption description.
+                          jsxs('header', {
+                            style: { minWidth: 0, flexShrink: 0 },
                             children: [
-                              jsx('span', {
-                                style: { fontSize: '12px', color: 'var(--ui-text-tertiary)', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' },
-                                children: t('manage.preview')
+                              jsxs('div', {
+                                style: detailTitleLineStyle,
+                                children: [
+                                  jsx('h3', { style: detailTitleStyle, children: selected.label }, 'h'),
+                                  (selected.tags || []).map(tag =>
+                                    jsx('span', { style: pillStyle, children: tag }, tag)
+                                  )
+                                ]
                               }),
-                              jsx('span', { style: { flex: 1 } }),
+                              selected.description
+                                ? jsx('p', { style: detailDescStyle, children: selected.description }, 'p')
+                                : null
+                            ]
+                          }, 'head'),
+                          // Meta card — the exact skill-detail frontmatter grid
+                          // (name / description / tags rows).
+                          jsx('div', {
+                            style: metaCardStyle,
+                            children: [
+                              jsxs('div', {
+                                style: metaRowStyle,
+                                children: [
+                                  jsx('span', { style: metaKeyStyle, children: t('manage.metaName') }, 'k'),
+                                  jsx('span', { style: metaValStyle, children: selected.label }, 'v')
+                                ]
+                              }, 'name'),
+                              selected.description
+                                ? jsxs('div', {
+                                    style: metaRowStyle,
+                                    children: [
+                                      jsx('span', { style: metaKeyStyle, children: t('manage.metaDesc') }, 'k'),
+                                      jsx('span', { style: metaValStyle, children: selected.description }, 'v')
+                                    ]
+                                  }, 'desc')
+                                : null,
+                              (selected.tags || []).length > 0
+                                ? jsxs('div', {
+                                    style: metaRowStyle,
+                                    children: [
+                                      jsx('span', { style: metaKeyStyle, children: t('manage.metaTags') }, 'k'),
+                                      jsx('span', { style: metaValStyle, children: (selected.tags || []).join(', ') }, 'v')
+                                    ]
+                                  }, 'tags')
+                                : null
+                            ]
+                          }, 'meta'),
+                          // Content = official <pre> card (same skin + mono).
+                          jsx('div', { style: preCardStyle, children: selected.text }, 'pre'),
+                          // actionBar (DetailColumn footer pattern): pinned row
+                          // under the scroll — primary insert + text buttons.
+                          jsxs('div', {
+                            style: { ...toolbarRowStyle, flexShrink: 0 },
+                            children: [
                               jsx(Button, {
                                 variant: 'outline',
                                 size: 'sm',
+                                onClick: () => insertSnippet(selected),
+                                children: t('manage.insert')
+                              }, 'insert'),
+                              jsx(Button, {
+                                variant: 'text',
+                                size: 'sm',
                                 onClick: () => openEdit(selected),
                                 children: t('manage.edit')
-                              }),
+                              }, 'edit'),
                               jsx(Button, {
-                                variant: pendingDel === selected.id ? 'destructive' : 'ghost',
+                                variant: 'text',
                                 size: 'sm',
+                                style:
+                                  pendingDel === selected.id
+                                    ? { color: 'var(--destructive)', marginLeft: 'auto' }
+                                    : { color: 'var(--ui-text-tertiary)', marginLeft: 'auto' },
                                 onClick: () =>
                                   dispatch({ type: pendingDel === selected.id ? 'delete' : 'arm-delete', id: selected.id }),
                                 children: pendingDel === selected.id ? t('manage.confirmDel') : t('manage.del')
-                              })
+                              }, 'del')
                             ]
-                          }),
-                          jsxs('div', {
-                            style: detailHeadStyle,
-                            children: [
-                              jsx('div', { style: detailTitleStyle, children: selected.label }),
-                              selected.description
-                                ? jsx('div', { style: detailDescStyle, children: selected.description })
-                                : null,
-                              (selected.tags || []).length > 0
-                                ? jsx('div', {
-                                    style: tagBarStyle,
-                                    children: (selected.tags || []).map(tag =>
-                                      jsx('span', { style: tagChipStyle, children: tag }, tag)
-                                    )
-                                  })
-                                : null
-                            ]
-                          }),
-                          jsxs('div', {
-                            style: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '4px' },
-                            children: [
-                              jsx('div', {
-                                style: { fontSize: '12px', opacity: 0.7, flexShrink: 0 },
-                                children: t('manage.content')
-                              }),
-                              jsx('div', {
-                                style: { ...contentBoxStyle, background: 'transparent' },
-                                children: selected.text
-                              })
-                            ]
-                          }),
-                          jsx(Button, {
-                            variant: 'secondary',
-                            size: 'sm',
-                            style: { width: '100%', flexShrink: 0 },
-                            onClick: () => insertSnippet(selected),
-                            children: t('manage.insert')
-                          })
+                          }, 'bar')
                         ]
                       }, 'detail')
                     : jsx('div', { style: placeholderBoxStyle, children: t('manage.placeholder') }, 'empty')
