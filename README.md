@@ -1,5 +1,7 @@
 # Prompt Snippets — Hermes 桌面端自定义提示词片段 ![版本](https://img.shields.io/badge/版本-v1.5.1-blue)
 
+[![Hermes 官方插件目录](https://img.shields.io/badge/Hermes_官方插件目录-已收录-blue)](https://hermes-agent.nousresearch.com/docs/plugins)
+
 Hermes Agent 桌面端插件：把你自己常用的提示词存成片段，一键插入聊天输入框。
 
 官方自带的「提示词片段」是写死的三条（code review / implementation plan / explain this），无法自定义。这个插件补上了这一块——片段完全由你定义，并且给了两条使用路径：
@@ -33,7 +35,7 @@ Hermes Agent 桌面端插件：把你自己常用的提示词存成片段，一�
 
 ## 安装
 
-### 方式一：官方插件目录（推荐）
+### 方式一：官方插件目录（推荐，已通过官方审查收录）
 
 ```bash
 hermes plugins install prompt-snippets
