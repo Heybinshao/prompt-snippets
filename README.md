@@ -1,4 +1,4 @@
-# Prompt Snippets — Hermes 桌面端自定义提示词片段 ![版本](https://img.shields.io/badge/版本-v1.6.1-blue)
+# Prompt Snippets — Hermes 桌面端自定义提示词片段 ![版本](https://img.shields.io/badge/版本-v1.7.0-blue)
 
 [![Hermes 官方插件目录](https://img.shields.io/badge/Hermes_官方插件目录-已收录-blue)](https://hermes-agent.nousresearch.com/docs/plugins)
 
@@ -104,7 +104,7 @@ hermes plugins update prompt-snippets
 
 ## 技术说明
 
-- 插入走 Hermes 官方 `hermes:composer-insert` 事件总线，由弹窗实例所在的 composer surface 解析路由，多会话并排时精确投递
+- 插入优先走 Hermes 官方 `host.composer` 草稿接口（`insertText` 块插入，带确认；`@引用` / `/命令` 由应用自己水化成 chip），按会话寻址，多会话并排时精确投递；旧版桌面端自动回落到官方 `hermes:composer-insert` 事件总线，两端行为一致
 - 界面完全使用官方 SDK 组件（Dialog / Button / Input / Textarea），跟随应用主题与语言
 - 插件重载（热重载 / 停用）时自动清理全部状态与监听器，无残留
 

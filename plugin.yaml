@@ -1,5 +1,5 @@
 name: prompt-snippets
-version: 1.6.1
+version: 1.7.0
 description: "Prompt snippet library for the Hermes Desktop composer: a quick-pick overlay styled after the app's own slash menu (own shortcut), plus a management view with drag reordering, group tags and import/export. Inserts into the focused session, not the active one."
 author: Heybinshao
 license: MIT

@@ -225,12 +225,53 @@ export function reorderSnippet(list, fromId, toId) {
 
 // ── Module-level state ─────────────────────────────────────────────────────
 
+// ── host.composer draft API (hermes-agent #120907) ────────────────────────
+// Hosts exposing host.composer get session-addressed writes through the app's
+// own paint path (insertText acked; @-ref / `/` tokens hydrate as chips) —
+// the supported door per the SDK docs. Every verb is fail-closed: a false
+// return means "no live surface answers this address", so the caller drops to
+// the legacy DOM chain below — never a silent loss. Older hosts (every
+// released desktop build before the API shipped) take the legacy path
+// unchanged.
+function sdkComposer() {
+  const c = host.composer
+  return c && typeof c.insertText === 'function' && typeof c.getDraft === 'function' && typeof c.setDraft === 'function' ? c : null
+}
+
+function sdkSessionId() {
+  try {
+    const id = host.state?.focusedSessionId?.get?.()
+    return typeof id === 'string' && id ? id : null
+  } catch {
+    return null
+  }
+}
+
+// Migration-table insert (consumers table, #120907): append as a block; when
+// insertText finds no surface, re-read the draft (mounted text, else the
+// persisted stash) and replace it with draft + '\n' + text.
+async function sdkAppendBlock(c, sid, text) {
+  try {
+    if (await c.insertText(sid, text, { mode: 'block' })) return true
+    const draft = (await c.getDraft(sid)) ?? ''
+    return await c.setDraft(sid, draft ? `${draft}\n${text}` : text)
+  } catch {
+    return false
+  }
+}
+
 const $managerOpen = atom(false)
 // 'manage' = CRUD list (from the "+" menu / ⌘K), 'quick' = Cmd-K-style picker
 // (from the keybind). One dialog, two entry-intent views.
 const $mode = atom('manage')
 let store = null
 let insertCtxRef = null
+// Session id captured WHEN an open flow starts — the SDK-mode counterpart of
+// openSurface below (same capture timing, same stale-focus defense: the
+// picker's filter input steals DOM focus, so inserts address this snapshot,
+// not focus-at-pick-time). Null when the flow began on a not-yet-created
+// session; the insert path then lets the SDK address 'new' / null.
+let openSid = null
 // The chat surface (data-composer-target value) captured WHEN the dialog
 // opens — at that moment focus still sits in the user's editor, so this is
 // the session the user means. The dialog itself is a body-level portal, so
@@ -1162,9 +1203,20 @@ function surfaceEditorEl(surface) {
   )
 }
 
-// Standalone insert (no React scope): bus first, then the captured "+"-menu
-// ctx, then a direct splice into THIS surface's editor.
-function insertTextIntoSurface(surface, text) {
+// Standalone insert (no React scope): host.composer (SDK hosts, session-
+// addressed), then the bus event, then the captured "+"-menu ctx, then a
+// direct splice into THIS surface's editor. The legacy chain below is kept
+// for every desktop build released before host.composer shipped.
+async function insertTextIntoSurface(surface, text, sid) {
+  const c = sdkComposer()
+  if (c) {
+    const ok = await sdkAppendBlock(c, sid ?? null, text)
+    if (ok) {
+      if (typeof c.focus === 'function') c.focus(sid ?? null)
+      return true
+    }
+    // Fail-closed (no live surface for the address) — fall through to DOM.
+  }
   try {
     window.dispatchEvent(
       new CustomEvent('hermes:composer-insert', {
@@ -1316,16 +1368,22 @@ function openQuickLayer({ composerEl, surface, filterPh, emptyLabel, insertFaile
     document.removeEventListener('pointerdown', onDocPointer, true)
     shell.remove()
     // The filter input stole focus from the composer; hand it back so the
-    // user keeps typing where the insert is about to land.
+    // user keeps typing where the insert is about to land. SDK hosts get the
+    // supported verb (session-addressed); the editor.focus() path is legacy.
     if (refocus) {
-      const ed = surfaceEditorEl(surface)
-      if (ed) ed.focus()
+      const c = sdkComposer()
+      if (c && typeof c.focus === 'function') {
+        c.focus(openSid)
+      } else {
+        const ed = surfaceEditorEl(surface)
+        if (ed) ed.focus()
+      }
     }
   }
 
-  function pick(sn) {
+  async function pick(sn) {
     close({ refocus: false })
-    if (!insertTextIntoSurface(surface, sn.text)) {
+    if (!(await insertTextIntoSurface(surface, sn.text, openSid))) {
       host.notify({ kind: 'error', message: insertFailedLabel })
     }
   }
@@ -1455,9 +1513,19 @@ function ManagerDialog() {
 
   if (!open || !shouldShow) return null
 
-  function insertIntoComposer(text) {
-    // Insert into THIS instance's own surface — the dialog physically lives
-    // in that session's composer dock, same as the official snippet dialog.
+  async function insertIntoComposer(text) {
+    // SDK hosts: address the session captured when the dialog opened (the
+    // dialog steals DOM focus, so probing focus here is useless — same
+    // reason the legacy chain snapshots openSurface at open time).
+    const c = sdkComposer()
+    if (c && (await sdkAppendBlock(c, openSid, text))) {
+      $managerOpen.set(false)
+      return true
+    }
+    // Legacy chain (every desktop build released before host.composer
+    // shipped): insert into THIS instance's own surface — the dialog
+    // physically lives in that session's composer dock, same as the official
+    // snippet dialog.
     let resolved = myTarget || openSurface || captureSurface() || firstVisibleSurface()
     try {
       window.dispatchEvent(
@@ -1519,7 +1587,7 @@ function ManagerDialog() {
     setPendingDel(null)
   }
 
-  function insertSnippet(sn) {
+  async function insertSnippet(sn) {
     // Defensive gate: the quick picker hides disabled rows, but manager
     // double-click / insert on a disabled row should explain, not silently
     // insert something the user meant to retire.
@@ -1527,7 +1595,7 @@ function ManagerDialog() {
       host.notify({ kind: 'info', message: t('notify.insertDisabled') })
       return
     }
-    if (insertIntoComposer(sn.text)) return
+    if (await insertIntoComposer(sn.text)) return
     host.notify({ kind: 'error', message: t('notify.insertFailed') })
   }
 
@@ -1587,7 +1655,7 @@ function ManagerDialog() {
   function dispatch(action) {
     if (action.type === 'insert') {
       const sn = list.find(s => s.id === action.id)
-      if (sn) insertSnippet(sn)
+      if (sn) void insertSnippet(sn)
       return
     }
     if (action.type === 'select') {
@@ -2003,7 +2071,7 @@ function ManagerDialog() {
                               jsx(Button, {
                                 variant: 'outline',
                                 size: 'sm',
-                                onClick: () => insertSnippet(selected),
+                                onClick: () => void insertSnippet(selected),
                                 children: t('manage.insert')
                               }, 'insert'),
                               jsx(Button, {
@@ -2070,6 +2138,7 @@ export default {
           icon: 'wand',
           run: insertCtx => {
             insertCtxRef = insertCtx
+            openSid = sdkSessionId()
             openSurface = captureSurface() || firstVisibleSurface()
             $mode.set('manage')
             $managerOpen.set(true)
@@ -2086,6 +2155,7 @@ export default {
           label: ti18n('menu.label'),
           keywords: ['snippet', '片段', '提示词', 'prompt'],
           run: () => {
+            openSid = sdkSessionId()
             openSurface = captureSurface() || firstVisibleSurface()
             $mode.set('manage')
             $managerOpen.set(true)
@@ -2112,6 +2182,7 @@ export default {
             // Native quick layer, built directly into the focused surface's
             // composer-root (no React state hop — a React-owned node moved
             // there lost keyboard handling and crashed unmount).
+            openSid = sdkSessionId()
             const surface = captureSurface() || firstVisibleSurface()
             openSurface = surface
             if (surface && surfaceComposerEl(surface)) {
@@ -2166,6 +2237,7 @@ export default {
         insertCtxRef = null
         if (typeof disposeI18n === 'function') disposeI18n()
         openSurface = null
+        openSid = null
         if (quickLayerClose) quickLayerClose({ refocus: false }) // native quick layer teardown
         $managerOpen.set(false)
         $mode.set('manage')
