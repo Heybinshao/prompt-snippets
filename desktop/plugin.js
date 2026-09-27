@@ -7,16 +7,17 @@
  *   - Data lives in ctx.storage (localStorage key
  *     hermes.plugin.prompt-snippets.snippets-v1). No backend, no build step.
  *
- * Mechanism:
+ * Mechanism (v1.8.0, catalog review #121246):
  *   - composer.attachments data contribution = the "+" menu row (stable SDK contract).
- *   - composer.underside render contribution = dialog host (renders null when closed).
+ *   - composer.top render contribution = dialog + quick-picker host (both render
+ *     null when closed; the picker is an SDK Popover anchored to our own node).
+ *   - every composer write goes through host.composer (insertText/setDraft/focus,
+ *     session-addressed, fail-closed) — no app DOM, no app events (catalog rule 8).
  *   - onDispose clears module state on disable/reload; no residue.
- *   - insertCtx is captured fresh on every menu-row click (run), so the dialog
- *     always inserts through a closure from the current composer render.
  */
-import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Codicon, Dialog, DialogContent, Switch, DialogDescription, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
+import { COMPOSER_AREAS, KEYBINDS_AREA, PALETTE_AREA, Button, Codicon, Dialog, DialogContent, Popover, PopoverContent, PopoverTrigger, Switch, DialogDescription, DialogHeader, DialogTitle, Input, Textarea, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const STORAGE_KEY = 'snippets-v1'
 // Two-pane manager gets a wider shell: max-w-3xl is a compiled dist class and
@@ -137,8 +138,6 @@ const LOCALES = {
 // Exact tabler IconMessage2 paths (lib/icons.ts:75 maps MessageSquareText to
 // @tabler/icons-react IconMessage2), inlined as raw SVG so the plugin doesn't
 // need the icons import surface.
-const MESSAGE_SQUARE_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9h8"/><path d="M8 13h6"/><path d="M9 18h-3a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-3l-3 3l-3 -3"/></svg>'
 
 // ── Data layer (pure functions, return new arrays, never mutate) ──────────
 
@@ -229,10 +228,10 @@ export function reorderSnippet(list, fromId, toId) {
 // Hosts exposing host.composer get session-addressed writes through the app's
 // own paint path (insertText acked; @-ref / `/` tokens hydrate as chips) —
 // the supported door per the SDK docs. Every verb is fail-closed: a false
-// return means "no live surface answers this address", so the caller drops to
-// the legacy DOM chain below — never a silent loss. Older hosts (every
-// released desktop build before the API shipped) take the legacy path
-// unchanged.
+// return means "no live surface answers this address", and the caller tells
+// the user — never reaches into app DOM (catalog rule 8; review #121246). The
+// plugin manifest gates on `requires_hermes: ">=0.21.5"` so an older host
+// never installs a build whose only door is missing.
 function sdkComposer() {
   const c = host.composer
   return c && typeof c.insertText === 'function' && typeof c.getDraft === 'function' && typeof c.setDraft === 'function' ? c : null
@@ -265,73 +264,13 @@ const $managerOpen = atom(false)
 // (from the keybind). One dialog, two entry-intent views.
 const $mode = atom('manage')
 let store = null
-let insertCtxRef = null
-// Session id captured WHEN an open flow starts — the SDK-mode counterpart of
-// openSurface below (same capture timing, same stale-focus defense: the
-// picker's filter input steals DOM focus, so inserts address this snapshot,
-// not focus-at-pick-time). Null when the flow began on a not-yet-created
-// session; the insert path then lets the SDK address 'new' / null.
+// Session id captured WHEN an open flow starts. The picker's filter input and
+// the manager dialog both steal DOM focus, so inserts and Escape-refocus
+// address this snapshot instead of probing focus at pick time. `null` = the
+// active composer (host.composer's own addressing: what the user last clicked
+// into) — which is exactly right for a flow that began from a "+"/palette/keyb
+// in the session the user is looking at.
 let openSid = null
-// The chat surface (data-composer-target value) captured WHEN the dialog
-// opens — at that moment focus still sits in the user's editor, so this is
-// the session the user means. The dialog itself is a body-level portal, so
-// activeElement probes AFTER opening point nowhere useful.
-let openSurface = null
-// Last-focused chat surface, kept fresh by a focusin listener: clicking a
-// session's header/messages focuses the pane but NOT an input, so
-// activeElement at keybind time can be <body> even though the user clearly
-// "is" in the right-hand session. Tracking the last surface that received
-// ANY focus event survives that.
-let lastFocusedSurface = null
-// Last surface the user interacted with by POINTER (mousedown anywhere inside
-// its [data-composer-target] chain). Clicking a session's header/message area
-// gives it no focusin event, so focus tracking alone loses the session the
-// user just clicked into — but the pointerdown always fires.
-let lastPointerSurface = null
-let focusTrackerInstalled = false
-
-function onFocusIn(event) {
-  const el = event.target
-  if (el && el.closest) {
-    const surface = el.closest('[data-composer-target]')
-    if (surface) lastFocusedSurface = surface.getAttribute('data-composer-target')
-  }
-}
-
-function onPointerDown(event) {
-  const el = event.target
-  if (el && el.closest) {
-    const surface = el.closest('[data-composer-target]')
-    if (surface) lastPointerSurface = surface.getAttribute('data-composer-target')
-  }
-}
-
-function ensureFocusTracker() {
-  if (focusTrackerInstalled || typeof window === 'undefined') return
-  focusTrackerInstalled = true
-  window.addEventListener('focusin', onFocusIn, true)
-  window.addEventListener('pointerdown', onPointerDown, true)
-}
-
-function captureSurface() {
-  // 1. Real focus wins (the user typed in that editor most recently).
-  const anchor = document.activeElement
-  if (anchor && anchor.closest) {
-    const surface = anchor.closest('[data-composer-target]')
-    if (surface) return surface.getAttribute('data-composer-target')
-  }
-  // 2. The surface the user last clicked into (covers "clicked the tile's
-  //    header/messages, then hit the keybind" — no focus event there).
-  if (lastPointerSurface) return lastPointerSurface
-  // 3. Last focusin target, if any.
-  return lastFocusedSurface
-}
-
-function firstVisibleSurface() {
-  const surfaces = Array.from(document.querySelectorAll('[data-composer-target]'))
-  const visible = surfaces.find(el => el.closest('[data-pane-hidden]') === null)
-  return visible ? visible.getAttribute('data-composer-target') : 'main'
-}
 
 // ── Keybind backup (2026-09-05) ────────────────────────────────────────────
 // The official keybind store persists ONLY bindings whose action is currently
@@ -1048,52 +987,10 @@ const toolbarRowStyle = {
 }
 
 // ── Quick picker (Cmd-K style: filter + ↑↓ + ↵) ───────────────────────────
-
-// Official `/` drawer skin (composerPanelCard, composer-dock.ts:31-35) inlined:
-// rounded-2xl, hairline border-border/65, shadow-nous (4-layer stack verified
-// in dist CSS), --dt-card 72% translucent fill + backdrop blur, tool font size.
-// Width = full composer width (left/right 0) like the official drawer.
-// Official `/` drawer geometry + skin, verbatim from COMPLETION_DRAWER_CLASS
-// (completion-drawer.tsx) and composerPanelCard (composer-dock.ts). The layer
-// is MOVED into this instance's [data-slot="composer-root"] after mount — the
-// same parent the official drawer renders in (relative anchor) — so plain CSS
-// positions it and zero JS measurement is involved. No `position: fixed`: a
-// glassy backdrop-filter ancestor hijacks the fixed coordinate system, which
-// is exactly what mis-positioned earlier attempts.
-const inlineShellStyle = {
-  position: 'absolute',
-  bottom: '100%', // bottom-full
-  left: '8px', // left-2
-  marginBottom: '4px', // mb-1
-  zIndex: 50,
-  width: '20rem', // w-80
-  maxWidth: 'calc(100% - 1rem)', // max-w-[calc(100%-1rem)]
-  maxHeight: 'min(22rem, calc(100vh - 8rem))',
-  overflowY: 'auto',
-  // Belt-and-braces: an auto overflow-y computes overflow-x to auto too, so
-  // any stray horizontal overflow would open a scroll channel that
-  // scroll-positioning could shift (eating the shell's left padding).
-  overflowX: 'hidden',
-  overscrollBehavior: 'contain',
-  padding: '4px', // p-1
-  // composerPanelCard skin, verbatim:
-  // rounded-2xl compiles to calc(var(--radius-scalar) * 1.5rem) — the
-  // --radius-2xl var itself lives in Tailwind's @theme inline block which is
-  // NOT emitted as a runtime CSS variable, so referencing it resolves to
-  // nothing (same trap as var(--border) before). --radius-scalar is a real
-  // :root var (styles.css:464, runtime value 0.2).
-  borderRadius: 'calc(var(--radius-scalar) * 1.5rem)',
-  // border-border/65 compiles to --dt-border in oklab (dist CSS verified):
-  // var(--border) does NOT exist in the theme, which made the border invisible.
-  border: '1px solid color-mix(in oklab, var(--dt-border) 65%, transparent)',
-  boxShadow: 'var(--shadow-nous)',
-  background: 'color-mix(in srgb, var(--dt-card) 72%, transparent)',
-  backdropFilter: 'blur(0.75rem) saturate(1.12)',
-  WebkitBackdropFilter: 'blur(0.75rem) saturate(1.12)',
-  transition: 'background-color 150ms ease-out',
-  fontSize: 'var(--conversation-tool-font-size)',
-  color: 'var(--popover-foreground)'
-}
+// v1.8.0 (#121246 review): the picker renders through the SDK's Popover
+// anchored to THIS instance's contributed node — no app markup, no synthetic
+// events. Row/list styles below are kept (they matched the official drawer
+// row rhythm and the React picker reuses them).
 
 // Must NOT be `display: grid` (the original bug): a grid auto column sizes to
 // the items' max-content, so one long row pushed every row past the 20rem
@@ -1179,85 +1076,58 @@ const quickDescStyle = {
   color: 'var(--ui-text-tertiary)'
 }
 
-// ── Quick picker: native DOM layer hosted INSIDE composer-root ────────────
-// The official `/` drawer is an absolute child of ComposerPrimitive.Root and
-// anchors with plain CSS (bottom-full left-2 mb-1 w-80). Contrib slots render
-// OUTSIDE that root, and a React-owned node re-parented there breaks keyboard
-// handling + unmount — so this layer is built and torn down in plain DOM:
-// same geometry, same skin, events bound to the nodes that receive them.
+// ── Per-instance identity inside composer areas ───────────────────────────
+// A composer area mounts once per visible chat surface (primary + every
+// split tile), and the SDK hands a slot render no session argument — so the
+// contribution reads the session anchor the app itself stamps on its own
+// ChatView wrapper (`data-session-anchor`, the same selector reviewed into
+// this plugin family under #116031): `workspace` for the primary pane,
+// `session-tile:<storedId>` for a tile. A pointerdown tracker records the
+// anchor of the surface the user last touched (menu items portal to body, so
+// reading focus at run() time would point nowhere useful); an open flow
+// snapshots it, and each instance shows its chrome only when its own anchor
+// matches — the dialog/picker appear in the session the user actually opened
+// them from.
+let lastAnchor = null
+let anchorTrackerInstalled = false
 
-function surfaceComposerEl(surface) {
-  // `data-composer-target` hangs on the ChatView ROOT div — an ANCESTOR of
-  // composer-root (chat/index.tsx:654). Descend, don't climb.
-  const host = document.querySelector(`[data-composer-target="${surface}"]`)
-  return host ? host.querySelector('[data-slot="composer-root"]') : null
+function onAnchorPointerDown(event) {
+  const el = event.target
+  if (el && typeof el.closest === 'function') {
+    const a = el.closest('[data-session-anchor]')
+    if (a) lastAnchor = a.getAttribute('data-session-anchor')
+  }
 }
 
-function surfaceEditorEl(surface) {
-  const host = document.querySelector(`[data-composer-target="${surface}"]`)
-  if (!host) return null
-  return (
-    host.querySelector('[data-slot="composer-input"]') ||
-    host.querySelector('.ProseMirror[contenteditable="true"]') ||
-    host.querySelector('[contenteditable="true"]')
-  )
+function ensureAnchorTracker() {
+  if (anchorTrackerInstalled || typeof window === 'undefined') return
+  anchorTrackerInstalled = true
+  window.addEventListener('pointerdown', onAnchorPointerDown, true)
 }
 
-// Standalone insert (no React scope): host.composer (SDK hosts, session-
-// addressed), then the bus event, then the captured "+"-menu ctx, then a
-// direct splice into THIS surface's editor. The legacy chain below is kept
-// for every desktop build released before host.composer shipped.
-async function insertTextIntoSurface(surface, text, sid) {
+function dropAnchorTracker() {
+  if (!anchorTrackerInstalled || typeof window === 'undefined') return
+  window.removeEventListener('pointerdown', onAnchorPointerDown, true)
+  anchorTrackerInstalled = false
+  lastAnchor = null
+}
+
+// Insert path (catalog rule 8: SDK only — no app DOM, no app events). False
+// means no live surface answered the address; the caller tells the user.
+async function insertSnippetText(text, sid) {
   const c = sdkComposer()
-  if (c) {
-    const ok = await sdkAppendBlock(c, sid ?? null, text)
-    if (ok) {
-      if (typeof c.focus === 'function') c.focus(sid ?? null)
-      return true
-    }
-    // Fail-closed (no live surface for the address) — fall through to DOM.
-  }
-  try {
-    window.dispatchEvent(
-      new CustomEvent('hermes:composer-insert', {
-        detail: { mode: 'block', target: surface, text }
-      })
-    )
-    return true
-  } catch {
-    // Fall through to legacy paths.
-  }
-  if (insertCtxRef && typeof insertCtxRef.insertText === 'function') {
-    try {
-      insertCtxRef.insertText(text)
-      return true
-    } catch {
-      // Stale closure after a reload — fall through.
-    }
-  }
-  const editor = surfaceEditorEl(surface)
-  if (editor) {
-    const current = editor.innerText || ''
-    const sep = current && !current.endsWith('\n') ? '\n' : ''
-    editor.textContent = `${current}${sep}${text}`
-    editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
-    const sel = window.getSelection()
-    const range = document.createRange()
-    range.selectNodeContents(editor)
-    range.collapse(false)
-    sel.removeAllRanges()
-    sel.addRange(range)
-    editor.focus()
-    return true
-  }
-  return false
+  if (!c) return false
+  return sdkAppendBlock(c, sid ?? null, text)
 }
 
-let quickLayerClose = null // set while a quick layer is open; onDispose uses it
 
-function openQuickLayer({ composerEl, surface, filterPh, emptyLabel, insertFailedLabel }) {
-  if (quickLayerClose) quickLayerClose()
-  if (!composerEl) return false
+const $quickOpen = atom(false)
+// Anchor snapshot for the currently-open flow (dialog or picker). Set at
+// run()-time from the pointer tracker; consumed by the per-instance gates.
+let openAnchor = null
+let QUICK_SNIPPETS = []
+
+function openQuickLayer() {
   // The picker is the "daily driver" surface: disabled snippets are hidden
   // here but stay fully visible/manageable in the manager dialog.
   const snippets = loadSnippets().filter(sn => sn.enabled !== false)
@@ -1265,179 +1135,182 @@ function openQuickLayer({ composerEl, surface, filterPh, emptyLabel, insertFaile
     // Nothing to pick — fall to the manage view so the user can create.
     $mode.set('manage')
     $managerOpen.set(true)
-    return true
+    return
   }
+  QUICK_SNIPPETS = snippets
+  $mode.set('quick')
+  $quickOpen.set(true)
+}
 
-  let query = ''
-  let active = 0
-  const view = () =>
-    snippets.filter(
-      s =>
-        s.label.toLowerCase().includes(query) ||
-        (s.description || '').toLowerCase().includes(query)
-    )
+function QuickPicker() {
+  const t = usePluginI18n(ID)
+  const open = useValue($quickOpen)
+  const mode = useValue($mode)
+  const [anchorEl, setAnchorEl] = useState(null)
+  const [myAnchor, setMyAnchor] = useState(undefined)
+  const [query, setQuery] = useState('')
+  const [active, setActive] = useState(0)
+  const inputRef = useRef(null)
+  const listRef = useRef(null)
 
-  const el = (tag, style) => {
-    const n = document.createElement(tag)
-    if (style) Object.assign(n.style, style)
-    return n
+  // Per-instance identity: the top strip renders inside each session's
+  // composer dock, so the nearest session anchor above OUR OWN node names
+  // this instance — the SDK-legal replacement for the old surface scan.
+  // Resolved once on mount via the ref callback render (probe-node pattern
+  // the manager dialog already used).
+  if (anchorEl && myAnchor === undefined) {
+    const a = typeof anchorEl.closest === 'function' ? anchorEl.closest('[data-session-anchor]') : null
+    setMyAnchor(a ? a.getAttribute('data-session-anchor') : 'workspace')
   }
-  const iconSpan = () => {
-    const s = el('span', quickIconStyle)
-    s.setAttribute('aria-hidden', 'true')
-    s.innerHTML = MESSAGE_SQUARE_SVG
-    return s
-  }
+  // Gate semantics: an unresolved identity (null snapshot or null anchor)
+  // must never swallow the picker — the old "picker vanished everywhere"
+  // regression came from exactly that in single-surface windows.
+  const show =
+    open && mode === 'quick' && (myAnchor === undefined || myAnchor === null || openAnchor === null || myAnchor === openAnchor)
 
-  const shell = el('div', inlineShellStyle)
-  shell.setAttribute('data-prompt-snippets-layer', '')
-
-  const filterRow = el('div', quickInputRowStyle)
-  filterRow.appendChild(iconSpan())
-  const input = el('input', {
-    flex: '1 1 0%',
-    minWidth: '0px',
-    font: 'inherit',
-    color: 'inherit',
-    background: 'transparent',
-    border: 'none',
-    outline: 'none',
-    padding: '0px'
-  })
-  input.placeholder = filterPh
-  input.spellcheck = false
-  filterRow.appendChild(input)
-  shell.appendChild(filterRow)
-
-  const listEl = el('div', quickListStyle)
-  shell.appendChild(listEl)
-
-  function renderRows() {
-    listEl.textContent = ''
-    const items = view()
-    if (items.length === 0) {
-      const d = el('div', { padding: '14px 0px', textAlign: 'center', fontSize: '13px', opacity: '0.55' })
-      d.textContent = emptyLabel
-      listEl.appendChild(d)
-      return
+  useEffect(() => {
+    if (show) {
+      setQuery('')
+      setActive(0)
+      requestAnimationFrame(() => inputRef.current?.focus())
     }
-    if (active >= items.length) active = 0
-    items.forEach((sn, i) => {
-      const btn = el('button', { ...quickRowStyle, ...(i === active ? quickRowActiveStyle : null) })
-      btn.type = 'button'
-      btn.appendChild(iconSpan())
-      const name = el('span', quickNameStyle)
-      name.textContent = sn.label
-      btn.appendChild(name)
-      if (sn.description) {
-        const desc = el('span', quickDescStyle)
-        desc.textContent = sn.description
-        btn.appendChild(desc)
-      }
-      btn.addEventListener('click', () => pick(sn))
-      btn.addEventListener('mousemove', () => {
-        if (active !== i) {
-          active = i
-          renderRows()
-        }
-      })
-      listEl.appendChild(btn)
-    })
-  }
+  }, [show])
 
-  function scrollActive() {
-    // Official pattern (trigger-popover.tsx): scroll the drawer itself, never
-    // scrollIntoView — it acts on every scrollable ancestor and can shift the
-    // layer horizontally / steal focus of the layout. `nearest` semantics:
-    // move only when the row overflows exactly one edge, shortest delta wins.
-    const node = listEl.children[active]
-    if (!node) return
-    const shellRect = shell.getBoundingClientRect()
-    const rowRect = node.getBoundingClientRect()
-    const visibleTop = shellRect.top + shell.clientTop
-    const visibleBottom = visibleTop + shell.clientHeight
-    const topDelta = rowRect.top - visibleTop
-    const bottomDelta = rowRect.bottom - visibleBottom
-    if ((topDelta < 0) === (bottomDelta > 0)) return // fully visible, or spans both edges
-    shell.scrollTop += Math.abs(topDelta) < Math.abs(bottomDelta) ? topDelta : bottomDelta
-  }
+  const items = QUICK_SNIPPETS.filter(
+    s => s.label.toLowerCase().includes(query) || (s.description || '').toLowerCase().includes(query)
+  )
 
   function close({ refocus = true } = {}) {
-    quickLayerClose = null
-    document.removeEventListener('keydown', onDocKey, true)
-    document.removeEventListener('pointerdown', onDocPointer, true)
-    shell.remove()
-    // The filter input stole focus from the composer; hand it back so the
-    // user keeps typing where the insert is about to land. SDK hosts get the
-    // supported verb (session-addressed); the editor.focus() path is legacy.
+    $quickOpen.set(false)
+    // The filter input stole focus from the composer; hand it back through
+    // the SDK verb (session-addressed) so the user keeps typing where the
+    // insert lands.
     if (refocus) {
       const c = sdkComposer()
-      if (c && typeof c.focus === 'function') {
-        c.focus(openSid)
-      } else {
-        const ed = surfaceEditorEl(surface)
-        if (ed) ed.focus()
-      }
+      if (c && typeof c.focus === 'function') c.focus(openSid)
     }
   }
 
   async function pick(sn) {
-    close({ refocus: false })
-    if (!(await insertTextIntoSurface(surface, sn.text, openSid))) {
-      host.notify({ kind: 'error', message: insertFailedLabel })
+    $quickOpen.set(false)
+    if (!(await insertSnippetText(sn.text, openSid))) {
+      host.notify({ kind: 'error', message: t('notify.insertFailed') })
+      return
     }
+    // insertText focuses a surface it paints, but the filter input stole
+    // focus after the ack — hand the caret back explicitly.
+    const c = sdkComposer()
+    if (c && typeof c.focus === 'function') c.focus(openSid)
   }
 
-  function onDocKey(e) {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      close()
-    }
+  function scrollActive() {
+    // Official pattern (trigger-popover.tsx): scroll the list itself, never
+    // scrollIntoView — it acts on every scrollable ancestor and can shift the
+    // layout sideways. `nearest` semantics via rects (offsetParent-agnostic):
+    // move only when the row overflows exactly one edge, shortest delta wins.
+    const list = listRef.current
+    const node = list?.children[active]
+    if (!node || !list) return
+    const listRect = list.getBoundingClientRect()
+    const rowRect = node.getBoundingClientRect()
+    const topDelta = rowRect.top - listRect.top
+    const bottomDelta = rowRect.bottom - listRect.bottom
+    if ((topDelta < 0) === (bottomDelta > 0)) return // fully visible, or spans both edges
+    list.scrollTop += Math.abs(topDelta) < Math.abs(bottomDelta) ? topDelta : bottomDelta
   }
-  function onDocPointer(e) {
-    if (!shell.contains(e.target)) close()
+
+  if (!show) {
+    // Keep the anchor node mounted even when closed so myAnchor resolves at
+    // app start, not lazily on first open (the manager's probe-node lesson).
+    return jsx('span', { ref: setAnchorEl, style: { position: 'absolute', width: '0px', height: '0px' } })
   }
 
-  input.addEventListener('keydown', e => {
-    if (e.isComposing) return // IME confirm (Chinese input) is not a pick
-    const items = view()
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      if (items.length) {
-        active = Math.min(active + 1, items.length - 1)
-        renderRows()
-        scrollActive()
-      }
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      if (items.length) {
-        active = Math.max(active - 1, 0)
-        renderRows()
-        scrollActive()
-      }
-    } else if (e.key === 'Enter') {
-      e.preventDefault()
-      const sn = view()[active]
-      if (sn) pick(sn)
-    }
-  })
-  input.addEventListener('input', () => {
-    query = input.value.trim().toLowerCase()
-    active = 0
-    renderRows()
-  })
-
-  // Capture-phase doc listeners: Escape closes from anywhere, a click outside
-  // the layer closes (Radix Dialog parity).
-  document.addEventListener('keydown', onDocKey, true)
-  document.addEventListener('pointerdown', onDocPointer, true)
-  quickLayerClose = close
-
-  composerEl.appendChild(shell)
-  renderRows()
-  requestAnimationFrame(() => input.focus())
-  return true
+  // Invisible trigger anchors the Popover; side="top" floats the panel above
+  // the composer exactly where the old native layer sat. Radix owns the
+  // portal, outside-click dismissal, and Escape — the three capture-phase
+  // listeners the native layer hand-rolled.
+  return jsx(Popover, {
+    open: true,
+    onOpenChange: o => { if (!o) close() },
+    children: jsxs('span', {
+      ref: setAnchorEl,
+      style: { position: 'absolute', width: '0px', height: '0px', overflow: 'visible' },
+      children: [
+        jsx(PopoverTrigger, {
+          asChild: true,
+          tabIndex: -1,
+          'aria-hidden': true,
+          children: jsx('span', { style: { display: 'block', width: '0px', height: '0px' } })
+        }, 'anchor'),
+        jsx(PopoverContent, {
+          align: 'start',
+          side: 'top',
+          sideOffset: 6,
+          collisionPadding: 12,
+          // Old drawer width/height bounds; the skin itself is PopoverContent's
+          // menu surface (same token path the official / drawer uses).
+          style: { width: '20rem', maxWidth: 'calc(100vw - 3rem)', padding: '4px' },
+          children: [
+            jsxs('div', {
+              style: quickInputRowStyle,
+              children: [
+                jsx('span', { 'aria-hidden': 'true', style: quickIconStyle, children: jsx(Codicon, { name: 'comment-discussion', size: '0.85rem' }) }, 'icon'),
+                jsx('input', {
+                  ref: inputRef,
+                  placeholder: t('quick.filterPh'),
+                  spellCheck: false,
+                  style: {
+                    flex: '1 1 0%',
+                    minWidth: '0px',
+                    font: 'inherit',
+                    color: 'inherit',
+                    background: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    padding: '0px'
+                  },
+                  onInput: e => { setQuery(String(e.target.value).trim().toLowerCase()); setActive(0) },
+                  onKeyDown: e => {
+                    if (e.isComposing) return // IME confirm (Chinese input) is not a pick
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault()
+                      if (items.length) { setActive(Math.min(active + 1, items.length - 1)); requestAnimationFrame(scrollActive) }
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault()
+                      if (items.length) { setActive(Math.max(active - 1, 0)); requestAnimationFrame(scrollActive) }
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const sn = items[active]
+                      if (sn) void pick(sn)
+                    }
+                  }
+                }, 'input')
+              ]
+            }, 'filter'),
+            jsx('div', {
+              ref: listRef,
+              style: { ...quickListStyle, maxHeight: 'min(16rem, calc(100vh - 24rem))', overflowY: 'auto' },
+              children: items.length === 0
+                ? jsx('div', { style: { padding: '14px 0px', textAlign: 'center', fontSize: '13px', opacity: '0.55' }, children: t('quick.empty') }, 'empty')
+                : items.map((sn, i) =>
+                    jsxs('button', {
+                      type: 'button',
+                      style: { ...quickRowStyle, ...(i === active ? quickRowActiveStyle : null) },
+                      onMouseMove: () => { if (active !== i) setActive(i) },
+                      onClick: () => void pick(sn),
+                      children: [
+                        jsx('span', { 'aria-hidden': 'true', style: quickIconStyle, children: jsx(Codicon, { name: 'comment-discussion', size: '0.85rem' }) }, 'icon'),
+                        jsx('span', { style: quickNameStyle, children: sn.label }, 'name'),
+                        ...(sn.description ? [jsx('span', { style: quickDescStyle, children: sn.description }, 'desc')] : [])
+                      ]
+                    }, sn.id)
+                  )
+            }, 'list')
+          ]
+        }, 'content')
+      ]
+    })
+  }, 'popover')
 }
 
 function ManagerDialog() {
@@ -1459,25 +1332,25 @@ function ManagerDialog() {
   const [pendingDel, setPendingDel] = useState(null)
   const [importText, setImportText] = useState('')
   const [wasOpen, setWasOpen] = useState(false)
-  // Which chat surface THIS dialog instance lives in. The underside slot
-  // renders inside each session's composer dock, so the DOM ancestor chain
-  // names our own surface — this is the same scoping the official snippet
-  // dialog gets for free from React context, and it's what makes inserts
-  // land in the session whose dock is showing the dialog.
-  const [myTarget, setMyTarget] = useState(null)
-  const [myTargetResolved, setMyTargetResolved] = useState(false)
+  // Which session THIS dialog instance lives in. The composer.top strip
+  // renders inside each session's composer dock, so the nearest session
+  // anchor above our own node names our instance — the same scoping the
+  // official snippet dialog gets for free from React context, and what
+  // makes inserts land in the session whose dock is showing the dialog.
+  const [myAnchor, setMyAnchor] = useState(null)
+  const [myAnchorResolved, setMyAnchorResolved] = useState(false)
 
-  // Resolve this instance's surface via a real DOM node. The probe div below
+  // Resolve this instance's anchor via a real DOM node. The probe div below
   // is rendered UNCONDITIONALLY (even when closed) so the resolution happens
   // once at app start, not lazily on open — gating before resolving meant
   // unopened instances never resolved and every gate passed through the
   // null-loophole.
   const [hostEl, setHostEl] = useState(null)
-  if (hostEl && !myTargetResolved) {
+  if (hostEl && !myAnchorResolved) {
     const inDoc = hostEl.isConnected
-    const surface = inDoc ? hostEl.closest('[data-composer-target]') : null
-    setMyTarget(surface ? surface.getAttribute('data-composer-target') : 'main')
-    setMyTargetResolved(true)
+    const a = inDoc ? hostEl.closest('[data-session-anchor]') : null
+    setMyAnchor(a ? a.getAttribute('data-session-anchor') : 'workspace')
+    setMyAnchorResolved(true)
   }
 
   // Reload data on each open (render-phase state adjustment pattern).
@@ -1499,71 +1372,25 @@ function ManagerDialog() {
   }
 
   // (Quick mode with zero snippets is handled inside openQuickLayer — the
-  // keybind flips to manage before any Dialog mounts. The React subtree only
-  // ever renders manage.)
+  // keybind flips to manage before any chrome mounts. QuickPicker renders
+  // only in quick mode; this dialog only in manage mode.)
 
-  // Only the instance whose surface matches the one captured at open time
+  // Only the instance whose anchor matches the one captured at open time
   // shows a dialog. Fallback chain keeps the dialog VISIBLE even when the
   // snapshot is missing or the per-instance identity failed to resolve — a
   // mismatched gate must never swallow the dialog entirely (that regression
   // made the whole picker vanish in single-surface windows).
   const shouldShow =
     open &&
-    (openSurface === null || myTarget === null || myTarget === openSurface || !myTargetResolved)
+    (openAnchor === null || myAnchor === null || myAnchor === openAnchor || !myAnchorResolved)
 
   if (!open || !shouldShow) return null
 
   async function insertIntoComposer(text) {
-    // SDK hosts: address the session captured when the dialog opened (the
-    // dialog steals DOM focus, so probing focus here is useless — same
-    // reason the legacy chain snapshots openSurface at open time).
-    const c = sdkComposer()
-    if (c && (await sdkAppendBlock(c, openSid, text))) {
-      $managerOpen.set(false)
-      return true
-    }
-    // Legacy chain (every desktop build released before host.composer
-    // shipped): insert into THIS instance's own surface — the dialog
-    // physically lives in that session's composer dock, same as the official
-    // snippet dialog.
-    let resolved = myTarget || openSurface || captureSurface() || firstVisibleSurface()
-    try {
-      window.dispatchEvent(
-        new CustomEvent('hermes:composer-insert', {
-          detail: { mode: 'block', target: resolved, text }
-        })
-      )
-      $managerOpen.set(false)
-      return true
-    } catch {
-      // Fall through to the legacy paths below.
-    }
-    // Legacy path 1: captured insert ctx from a "+" menu-row click.
-    if (insertCtxRef && typeof insertCtxRef.insertText === 'function') {
-      try {
-        insertCtxRef.insertText(text)
-        $managerOpen.set(false)
-        return true
-      } catch {
-        // Stale closure after a reload — fall through.
-      }
-    }
-    // Legacy path 2 (last resort): splice into the first visible editable.
-    const editors = Array.from(document.querySelectorAll('[data-slot="composer-input"], [contenteditable="true"].ProseMirror, div[role="textbox"][contenteditable="true"]'))
-    const editor = editors.find(el => el.offsetParent !== null) || editors[0]
-    if (editor) {
-      const current = editor.innerText || ''
-      const sep = current && !current.endsWith('\n') ? '\n' : ''
-      const next = `${current}${sep}${text}`
-      editor.textContent = next
-      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
-      const sel = window.getSelection()
-      const range = document.createRange()
-      range.selectNodeContents(editor)
-      range.collapse(false)
-      sel.removeAllRanges()
-      sel.addRange(range)
-      editor.focus()
+    // Address the session captured when the dialog opened (the dialog steals
+    // DOM focus, so probing focus here is useless). False = no live surface
+    // answered — tell the user, never reach into the app's DOM.
+    if (await insertSnippetText(text, openSid)) {
       $managerOpen.set(false)
       return true
     }
@@ -1751,16 +1578,13 @@ function ManagerDialog() {
   })()
   const selected = list.find(s => s.id === selectedId) || null
 
-  // Probe div ALWAYS renders (it is what resolves myTarget); the Dialog only
-  // mounts in the instance whose surface matches the open-time snapshot.
-  // Zero-size so the underside strip's `empty:hidden` visual isn't affected —
-  // the strip collapses only when its slot renders nothing, and a bare div
-  // with no box (display:contents contributes no layout) keeps it collapsed.
+  // Probe div ALWAYS renders (it is what resolves myAnchor); the Dialog only
+  // mounts in the instance whose anchor matches the open-time snapshot.
+  // Zero-size so the composer.top strip's `empty:hidden` visual isn't
+  // affected — the strip collapses only when its slot renders nothing, and a
+  // bare div with no box keeps it collapsed.
   //
-  // quick mode does NOT render React: the keybind run() builds a native DOM
-  // layer inside the surface's composer-root directly (openQuickLayer). A
-  // React-owned node re-parented there broke keyboard handling + unmount.
-  // The React subtree only renders the manage Dialog.
+  // quick mode renders the React QuickPicker (same contribution host).
   return jsx('div', {
     ref: setHostEl,
     style: { position: 'absolute', inset: '0px', pointerEvents: 'none' },
@@ -2111,7 +1935,7 @@ export default {
   description: 'Prompt snippet library: quick-pick overlay above the composer (own shortcut) + management view with drag reordering, tags, and import/export.',
   register(ctx) {
     store = ctx.storage
-    ensureFocusTracker()
+    ensureAnchorTracker()
 
     // Plugin i18n: register locale bundles (follows the app language); removed
     // with the disposer on unload. ti18n = non-reactive translator for
@@ -2136,10 +1960,9 @@ export default {
         data: {
           label: ti18n('menu.label'),
           icon: 'wand',
-          run: insertCtx => {
-            insertCtxRef = insertCtx
+          run: () => {
             openSid = sdkSessionId()
-            openSurface = captureSurface() || firstVisibleSurface()
+            openAnchor = lastAnchor
             $mode.set('manage')
             $managerOpen.set(true)
           }
@@ -2156,7 +1979,7 @@ export default {
           keywords: ['snippet', '片段', '提示词', 'prompt'],
           run: () => {
             openSid = sdkSessionId()
-            openSurface = captureSurface() || firstVisibleSurface()
+            openAnchor = lastAnchor
             $mode.set('manage')
             $managerOpen.set(true)
           }
@@ -2179,40 +2002,26 @@ export default {
           defaults: [...(keybindBackup || [])],
           label: ti18n('menu.label'),
           run: () => {
-            // Native quick layer, built directly into the focused surface's
-            // composer-root (no React state hop — a React-owned node moved
-            // there lost keyboard handling and crashed unmount).
+            // React picker (QuickPicker, mounted on our own composer .top
+            // contribution) — the SDK Popover owns the portal / Escape /
+            // outside-click, so no DOM layer is built here anymore.
             openSid = sdkSessionId()
-            const surface = captureSurface() || firstVisibleSurface()
-            openSurface = surface
-            if (surface && surfaceComposerEl(surface)) {
-              const ti = ti18nStatic
-              openQuickLayer({
-                composerEl: surfaceComposerEl(surface),
-                surface,
-                filterPh: ti('quick.filterPh'),
-                emptyLabel: ti('quick.empty'),
-                insertFailedLabel: ti('notify.insertFailed')
-              })
-            } else {
-              $mode.set('quick')
-              $managerOpen.set(true)
-            }
+            openAnchor = lastAnchor
+            openQuickLayer()
           }
         }
       })
     }
     registerStaticContributions()
 
-    // Dialog host — top strip is INSIDE ComposerPrimitive.Root (same anchor as
-    // the official `/` drawer): the inline picker's absolute bottom-full then
-    // floats right above the composer without shifting it. underside (below
-    // the composer) anchored the layer against the whole dock instead, which
-    // pushed the composer up — that was the "input moves" bug.
+    // Host strip — composer.top mounts once per visible session, and the
+    // picker's Popover anchors off this instance's own node (side=top floats
+    // it above the composer without shifting it).
     ctx.register({
       id: 'snippets-manager-host',
       area: COMPOSER_AREAS.top,
-      render: () => jsx(ManagerDialog, {})
+      render: () =>
+        jsxs('span', { style: { display: 'contents' }, children: [jsx(ManagerDialog, {}), jsx(QuickPicker, {})] })
     })
 
     // Locale live-switch: register-time strings (menu row / palette / keybind
@@ -2234,18 +2043,14 @@ export default {
       ctx.onDispose(() => {
         langObserver.disconnect()
         store = null
-        insertCtxRef = null
         if (typeof disposeI18n === 'function') disposeI18n()
-        openSurface = null
         openSid = null
-        if (quickLayerClose) quickLayerClose({ refocus: false }) // native quick layer teardown
+        openAnchor = null
+        QUICK_SNIPPETS = []
+        $quickOpen.set(false)
         $managerOpen.set(false)
         $mode.set('manage')
-        if (typeof window !== 'undefined') {
-          window.removeEventListener('focusin', onFocusIn, true)
-          window.removeEventListener('pointerdown', onPointerDown, true)
-          focusTrackerInstalled = false
-        }
+        if (typeof window !== 'undefined') dropAnchorTracker()
       })
     }
   }
