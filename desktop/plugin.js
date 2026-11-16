@@ -20,9 +20,9 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 import { useEffect, useRef, useState } from 'react'
 
 const STORAGE_KEY = 'snippets-v1'
-// Two-pane manager gets a wider shell: max-w-3xl is a compiled dist class and
-// wins the twMerge conflict against DialogContent's built-in max-w-lg.
-const DIALOG_MAX_W = 'max-w-3xl'
+// Two-pane manager shell width: inline style, NOT a Tailwind class — dist
+// only compiles max-w up to 3xl (768px); max-w-4xl is a dead string there.
+const DIALOG_STYLE = { width: 'min(960px, 92vw)', maxWidth: '92vw' }
 const ID = 'prompt-snippets'
 
 // ── i18n locale bundles（跟随 app 语言；解析链 当前 locale → en → 键名）──────
@@ -34,7 +34,7 @@ const LOCALES = {
       desc: 'Select a snippet on the left to preview and edit; insert with the button or double-click a row. Drag ⠿ to reorder (paused while filtering).',
       add: 'Add', empty: 'No snippets yet — click "Add" to create one',
       noMatch: 'No matching snippets',
-      searchPh: 'Search by name or description…', searchClear: 'Clear',
+      searchPh: 'Search by name, description or content…', searchClear: 'Clear',
       editTitle: 'Edit Snippet', addTitle: 'New Snippet',
       formDesc: 'Label and content are required.',
       fieldLabel: 'Label *', fieldLabelPh: 'e.g. Code review',
@@ -48,7 +48,14 @@ const LOCALES = {
       on: 'Enabled', off: 'Disabled', toggleLabel: 'Enable or disable this snippet',
       confirmDel: 'Click again to delete',
       import: 'Import', export: 'Export',
-      importTitle: 'Import snippets', importPh: 'Paste an exported JSON array…', importMerge: 'Merge'
+      importTitle: 'Import snippets', importPh: 'Paste an exported JSON array…', importMerge: 'Merge', importOverwrite: 'Overwrite',
+      importModeMerge: 'Merge — keep local changes for existing ids', importModeOverwrite: 'Overwrite — imported values replace existing ids',
+      importOverwriteDone: 'Overwrite imported', importUpdatedUnit: 'updated', importUpdatedNone: 'no content changes',
+      copy: 'Copy', copied: 'Copied',
+      select: 'Select', selectAll: 'Select all', cancelSelect: 'Cancel',
+      selectedCount: 'selected', batchDelete: 'Delete selected', batchConfirmDel: 'Click again to delete them',
+      batchDeleted: 'snippets deleted',
+      enableSelected: 'Enable', disableSelected: 'Disable', undo: 'Undo', undone: 'Undo done'
     },
     quick: {
       filterPh: 'Type to filter, ↑↓ to move, ↵ to insert, Esc to close',
@@ -69,7 +76,7 @@ const LOCALES = {
       desc: '左侧点选片段进行预览和编辑；点「插入」按钮或双击行插入。按住 ⠿ 拖动排序（搜索时暂停）。',
       add: '新增', empty: '还没有片段，点下方「新增」加一条',
       noMatch: '没有匹配的片段',
-      searchPh: '按名称或描述搜索…', searchClear: '清除',
+      searchPh: '按名称、描述或内容搜索…', searchClear: '清除',
       editTitle: '编辑片段', addTitle: '新增片段',
       formDesc: '名称和内容必填。',
       fieldLabel: '名称 *', fieldLabelPh: '如：代码审查',
@@ -83,7 +90,14 @@ const LOCALES = {
       on: '已启用', off: '已停用', toggleLabel: '启用或停用该片段',
       confirmDel: '再点一次确认删除',
       import: '导入', export: '导出',
-      importTitle: '导入片段', importPh: '粘贴导出的 JSON 数组…', importMerge: '合并导入'
+      importTitle: '导入片段', importPh: '粘贴导出的 JSON 数组…', importMerge: '合并导入', importOverwrite: '覆盖导入',
+      importModeMerge: '合并 — 已有 id 保留本地改动', importModeOverwrite: '覆盖 — 导入内容替换已有 id',
+      importOverwriteDone: '已覆盖导入', importUpdatedUnit: '条已更新', importUpdatedNone: '内容一致，无改动',
+      copy: '复制', copied: '已复制',
+      select: '选择', selectAll: '全选', cancelSelect: '取消',
+      selectedCount: '已选', batchDelete: '删除所选', batchConfirmDel: '再点一次确认删除',
+      batchDeleted: '条片段已删除',
+      enableSelected: '启用所选', disableSelected: '停用所选', undo: '撤销', undone: '已撤销'
     },
     quick: {
       filterPh: '输入过滤，↑↓ 选择，↵ 插入，Esc 关闭',
@@ -104,7 +118,7 @@ const LOCALES = {
       desc: '左側點選片段進行預覽和編輯；點「插入」按鈕或雙擊行插入。按住 ⠿ 拖動排序（搜尋時暫停）。',
       add: '新增', empty: '還沒有片段，點下方「新增」加一條',
       noMatch: '沒有符合的片段',
-      searchPh: '按名稱或描述搜尋…', searchClear: '清除',
+      searchPh: '按名稱、描述或內容搜尋…', searchClear: '清除',
       editTitle: '編輯片段', addTitle: '新增片段',
       formDesc: '名稱和內容必填。',
       fieldLabel: '名稱 *', fieldLabelPh: '如：代碼審查',
@@ -118,7 +132,14 @@ const LOCALES = {
       on: '已啟用', off: '已停用', toggleLabel: '啟用或停用該片段',
       confirmDel: '再點一次確認刪除',
       import: '匯入', export: '匯出',
-      importTitle: '匯入片段', importPh: '貼上匯出的 JSON 陣列…', importMerge: '合併匯入'
+      importTitle: '匯入片段', importPh: '貼上匯出的 JSON 陣列…', importMerge: '合併匯入', importOverwrite: '覆蓋匯入',
+      importModeMerge: '合併 — 已有 id 保留本地改動', importModeOverwrite: '覆蓋 — 匯入內容取代已有 id',
+      importOverwriteDone: '已覆蓋匯入', importUpdatedUnit: '條已更新', importUpdatedNone: '內容一致，無改動',
+      copy: '複製', copied: '已複製',
+      select: '選擇', selectAll: '全選', cancelSelect: '取消',
+      selectedCount: '已選', batchDelete: '刪除所選', batchConfirmDel: '再點一次確認刪除',
+      batchDeleted: '條片段已刪除',
+      enableSelected: '啟用所選', disableSelected: '停用所選', undo: '復原', undone: '已復原'
     },
     quick: {
       filterPh: '輸入過濾，↑↓ 選擇，↵ 插入，Esc 關閉',
@@ -173,15 +194,46 @@ export function updateSnippet(list, id, patch) {
   return list.map(s => (s.id === id ? { ...s, ...next } : s))
 }
 
-// Import merge: keep existing ids (local wins), append genuinely new records,
-// sanitising each. Returns { list, added }.
-export function mergeSnippets(list, incoming) {
+// Import merge/overwrite. Merge (default) keeps existing ids — local wins —
+// and appends genuinely new records. Overwrite replaces same-id records with
+// the incoming body (only when the body actually differs, so a re-import of
+// the same file reports "nothing changed"), and still appends new ones. A
+// record without an `enabled` key never flips the local enabled state.
+// Returns { list, added, updated }.
+function sameBody(a, b) {
+  return (
+    a.label === b.label &&
+    a.description === b.description &&
+    a.text === b.text &&
+    JSON.stringify(a.tags) === JSON.stringify(b.tags) &&
+    (a.enabled !== false) === (b.enabled !== false)
+  )
+}
+
+export function mergeSnippets(list, incoming, { overwrite = false } = {}) {
   const byId = new Map(list.map(s => [s.id, s]))
   let added = 0
+  let updated = 0
   const out = [...list]
   for (const sn of incoming) {
     if (!sn || typeof sn.label !== 'string' || typeof sn.text !== 'string') continue
-    if (byId.has(sn.id)) continue
+    if (byId.has(sn.id)) {
+      if (!overwrite) continue
+      const i = out.findIndex(s => s.id === sn.id)
+      const patch = {
+        label: sn.label,
+        description: typeof sn.description === 'string' ? sn.description : '',
+        text: sn.text,
+        tags: normalizeTags(sn.tags)
+      }
+      // No `enabled` key in the incoming record = leave the local state alone.
+      if ('enabled' in sn) patch.enabled = sn.enabled !== false
+      const next = { ...out[i], ...patch }
+      if (sameBody(out[i], next)) continue
+      out[i] = next
+      updated++
+      continue
+    }
     const rec = {
       id: typeof sn.id === 'string' && sn.id ? sn.id : `s-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       label: sn.label,
@@ -194,11 +246,26 @@ export function mergeSnippets(list, incoming) {
     out.push(rec)
     added++
   }
-  return { list: out, added }
+  return { list: out, added, updated }
 }
 
 export function removeSnippet(list, id) {
   return list.filter(s => s.id !== id)
+}
+
+// Search + tag predicate, shared by the list render and the select-mode
+// prune effect (checked ids must follow the visible set, or a filter change
+// could hide a checked row and batch-delete something the user can't see).
+export function matchesFilter(sn, q, tagFilter) {
+  q = String(q || '').toLowerCase()
+  if (tagFilter && !(sn.tags || []).includes(tagFilter)) return false
+  if (!q) return true
+  return (
+    sn.label.toLowerCase().includes(q) ||
+    (sn.description || '').toLowerCase().includes(q) ||
+    (sn.tags || []).some(tag => tag.toLowerCase().includes(q)) ||
+    (sn.text || '').toLowerCase().includes(q)
+  )
 }
 
 export function moveSnippet(list, id, dir) {
@@ -322,6 +389,17 @@ function syncKeybindBackup() {
     return
   }
 
+  // (v1.9) An explicitly EMPTY binding in the official store is a user
+  // decision (Settings → 清除绑定 persists []). Retire the backup then, so a
+  // later startup wipe can't resurrect a combo the user deliberately removed.
+  // A wipe (key absent) still falls through to the backup below — that is the
+  // bug this mirror exists for (hermes-agent#116331).
+  if (Array.isArray(officialCombo) && officialCombo.length === 0) {
+    keybindBackup = null
+    store.set(KEYBIND_BACKUP_KEY, [])
+    return
+  }
+
   const backup = store.get(KEYBIND_BACKUP_KEY, null)
   if (Array.isArray(backup) && backup.length > 0) {
     keybindBackup = backup
@@ -379,7 +457,10 @@ const rowStyle = {
   alignItems: 'center',
   gap: '8px', // gap-2
   borderRadius: 'calc(var(--radius-scalar) * 0.625rem)', // rounded-md
-  padding: '0 6px 0 8px', // pr-1.5 pl-2
+  // Card padding on every row: content no longer paints flush to the row's
+  // top/bottom edges (user 2026-11-17). Render site uses minHeight, so the
+  // card grows with its content instead of clipping it.
+  padding: '4px 10px',
   textAlign: 'left',
   transition: 'color 100ms ease-out, background-color 100ms ease-out',
   background: 'transparent',
@@ -395,7 +476,7 @@ const rowHoverStyle = {
 const rowBodyStyle = {
   display: 'grid',
   minWidth: 0,
-  gap: '2px', // gap-0.5
+  gap: '4px', // was 2px — title/caption were glued together
   flex: 1
 }
 
@@ -437,10 +518,14 @@ const badgeStyle = {
   flexShrink: 0,
   width: 'fit-content',
   borderRadius: '3px',
-  padding: '1px 4px', // px-1 py-px
+  // CJK glyphs have no built-in leading (unlike Latin ascender/descender
+  // space), so lineHeight:1 + 1px vertical padding painted the characters
+  // flush to / past the chip edge (user screenshot 2026-11-17). Give the
+  // box real leading: normal line-height + 2px vertical padding.
+  padding: '2px 4px', // was 1px 4px
   fontSize: '0.6rem',
   fontWeight: 500,
-  lineHeight: 1, // leading-none
+  lineHeight: 1.4, // was 1 (leading-none) — Latin-tuned, crushes CJK
   whiteSpace: 'nowrap',
   background: 'var(--ui-bg-tertiary)',
   color: 'var(--ui-text-tertiary)'
@@ -449,6 +534,7 @@ const badgeStyle = {
 const tagChipStyle = {
   ...badgeStyle,
   maxWidth: '72px',
+  // Truncation trio: maxWidth alone clips the glyphs without these two.
   overflow: 'hidden',
   textOverflow: 'ellipsis'
 }
@@ -498,7 +584,7 @@ const dragHandleStyle = {
 // height blow-out). `index` = position in the CURRENTLY RENDERED list (filter
 // may hide rows) — drag target math uses it; reorder commits by id so the
 // splice semantics stay correct.
-function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
+function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag, selectMode = false, checked = false, onToggleCheck = null }) {
   const [hover, setHover] = useState(false)
   const [pointerDragging, setPointerDragging] = useState(false)
   const rowRef = useRef(null)
@@ -523,7 +609,9 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
     ref: rowRef,
     style: {
       ...rowStyle,
-      height: hasSub ? '44px' : '32px', // h-11 / h-8
+      // minHeight, not height: the card's own padding (rowStyle) plus content
+      // define the real height; a fixed height would clip the padded card.
+      minHeight: hasSub ? '52px' : '38px',
       ...(hover ? rowHoverStyle : null),
       ...(selected ? rowSelectedStyle : null),
       ...(isDragging && pointerDragging
@@ -545,12 +633,24 @@ function SnippetRow({ snippet, list, index, dispatch, t, selected, canDrag }) {
       if (!fromId) setHover(false)
     },
     children: [
+      selectMode
+        ? jsx('input', {
+            type: 'checkbox',
+            checked,
+            onChange: () => onToggleCheck && onToggleCheck(snippet.id),
+            style: { flexShrink: 0, cursor: 'pointer' },
+            onClick: e => e.stopPropagation()
+          }, 'check')
+        : null,
       jsx(
         'button',
         {
           type: 'button',
-          onClick: () => dispatch({ type: 'select', id: snippet.id }),
-          onDoubleClick: () => dispatch({ type: 'insert', id: snippet.id }),
+          onClick: () =>
+            selectMode
+              ? onToggleCheck && onToggleCheck(snippet.id)
+              : dispatch({ type: 'select', id: snippet.id }),
+          onDoubleClick: selectMode ? undefined : () => dispatch({ type: 'insert', id: snippet.id }),
           style: labelBtnStyle,
           children: jsxs('span', {
             style: rowBodyStyle,
@@ -730,7 +830,9 @@ function SnippetForm({ draft, onDraft, t }) {
       control
     ] }, key)
   return jsxs('div', {
-    style: { display: 'grid', gap: '10px', paddingTop: '4px' },
+    // flex column so the content textarea can stretch (flex:1) to fill the
+    // pane's leftover height — the old fixed rows=6 was the cramp complaint.
+    style: { display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '4px', minHeight: 0 },
     children: [
       field('label', t('manage.fieldLabel'), jsx(Input, {
         value: draft.label,
@@ -749,17 +851,17 @@ function SnippetForm({ draft, onDraft, t }) {
       }, 'i')),
       field('text', t('manage.fieldText'), jsx(Textarea, {
         value: draft.text,
-        rows: 6,
         onChange: e => onDraft({ ...draft, text: e.target.value }),
-        placeholder: t('manage.fieldTextPh')
+        placeholder: t('manage.fieldTextPh'),
+        style: { flex: 1, minHeight: '120px', resize: 'none', fontFamily: 'var(--dt-font-mono)' }
       }, 'i'))
     ]
   })
 }
 
 // ── Manage dialog: two-pane layout styles ─────────────────────────────────
-// Dialog shell carries `max-w-3xl` (compiled class, beats the built-in
-// max-w-lg through twMerge) and `max-h-[85vh]`; the body grid owns the scroll,
+// Dialog shell width comes from DIALOG_STYLE (inline, min(960px, 92vw)) with
+// the built-in `max-h-[85vh]`; the body grid owns the scroll,
 // so the panes clamp to the shell with min-h-0 and scroll internally.
 
 const managerBodyStyle = {
@@ -776,7 +878,7 @@ const paneLeftStyle = {
   display: 'flex',
   flexDirection: 'column',
   gap: '8px',
-  width: '260px',
+  width: '280px',
   flexShrink: 0,
   minHeight: 0,
   paddingRight: '13px',
@@ -796,13 +898,15 @@ const paneRightStyle = {
 const listScrollStyle = {
   display: 'flex',
   flexDirection: 'column',
-  gap: '4px',
+  gap: '8px', // was 4px — rows were painted edge-to-edge (user 2026-11-17)
   flex: 1,
   minHeight: 0,
   overflowY: 'auto',
   overflowX: 'hidden',
   overscrollBehavior: 'contain',
-  paddingRight: '2px'
+  // Horizontal gutter so the row card's hover/selected fill doesn't touch
+  // the pane edges — the card reads as a card, not a full-bleed stripe.
+  padding: '0 4px'
 }
 
 const rightScrollStyle = {
@@ -1176,9 +1280,9 @@ function QuickPicker() {
     }
   }, [show])
 
-  const items = QUICK_SNIPPETS.filter(
-    s => s.label.toLowerCase().includes(query) || (s.description || '').toLowerCase().includes(query)
-  )
+  // Same predicate as the manager (name/description/tags/content) so both
+  // surfaces agree; quick layer is query-lowercased by its input handler.
+  const items = QUICK_SNIPPETS.filter(s => matchesFilter(s, query, null))
 
   function close({ refocus = true } = {}) {
     $quickOpen.set(false)
@@ -1313,6 +1417,33 @@ function QuickPicker() {
   }, 'popover')
 }
 
+// Clipboard write with the same fallback chain exportAll uses (async API →
+// hidden-textarea execCommand). `t` = reactive translator for the toast.
+function copyTextToClipboard(text, t) {
+  const done = () => host.notify({ kind: 'success', message: t('manage.copied') })
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      ta.remove()
+      if (ok) done()
+      else host.notify({ kind: 'warning', message: t('notify.exportFailed') })
+    } catch {
+      host.notify({ kind: 'warning', message: t('notify.exportFailed') })
+    }
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, fallback)
+  } else {
+    fallback()
+  }
+}
+
 function ManagerDialog() {
   const open = useValue($managerOpen)
   const mode = useValue($mode)
@@ -1330,6 +1461,12 @@ function ManagerDialog() {
   const [tagFilter, setTagFilter] = useState(null)
   // Two-click delete: first click arms, second (or timeout) commits.
   const [pendingDel, setPendingDel] = useState(null)
+  // Batch-select mode: checkbox set of ids in the FILTERED list. Entering
+  // selection clears pendingDel; filter change prunes ids that scrolled out.
+  const [selectMode, setSelectMode] = useState(false)
+  const [checkedIds, setCheckedIds] = useState(() => new Set())
+  const [batchArm, setBatchArm] = useState(false)
+  const [importOverwrite, setImportOverwrite] = useState(false)
   const [importText, setImportText] = useState('')
   const [wasOpen, setWasOpen] = useState(false)
   // Which session THIS dialog instance lives in. The composer.top strip
@@ -1366,10 +1503,26 @@ function ManagerDialog() {
     setSearch('')
     setTagFilter(null)
     setPendingDel(null)
+    setSelectMode(false)
+    setCheckedIds(new Set())
+    setBatchArm(false)
+    setImportOverwrite(false)
     setImportText('')
   } else if (!open && wasOpen) {
     setWasOpen(false)
   }
+
+  // Select-mode hygiene: when the filter (or list) changes, checked ids that
+  // fell out of the visible set are unchecked — batch actions then only ever
+  // touch rows the user can still see. No-op when nothing needs pruning.
+  useEffect(() => {
+    if (!selectMode) return
+    const qq = search.trim().toLowerCase()
+    setCheckedIds(prev => {
+      const next = new Set([...prev].filter(id => list.some(sn => sn.id === id && matchesFilter(sn, qq, tagFilter))))
+      return next.size === prev.size ? prev : next
+    })
+  }, [selectMode, search, tagFilter, list])
 
   // (Quick mode with zero snippets is handled inside openQuickLayer — the
   // keybind flips to manage before any chrome mounts. QuickPicker renders
@@ -1458,7 +1611,7 @@ function ManagerDialog() {
     }
   }
 
-  function importFrom(text) {
+  function importFrom(text, overwrite = false) {
     let parsed
     try {
       parsed = JSON.parse(text)
@@ -1469,8 +1622,20 @@ function ManagerDialog() {
       host.notify({ kind: 'error', message: t('notify.importBad') })
       return
     }
-    const { list: merged, added } = mergeSnippets(list, parsed)
-    if (added === 0) {
+    const { list: merged, added, updated } = mergeSnippets(list, parsed, { overwrite })
+    if (overwrite) {
+      if (added === 0 && updated === 0) {
+        host.notify({ kind: 'info', message: t('manage.importUpdatedNone') })
+      } else {
+        commit(merged)
+        host.notify({
+          kind: 'success',
+          message: updated === 0
+            ? `${t('notify.importDone')} ${added} ${t('notify.importUnit')}`
+            : `${t('manage.importOverwriteDone')}：${t('notify.importDone')} ${added} ${t('notify.importUnit')}，${updated} ${t('manage.importUpdatedUnit')}`
+        })
+      }
+    } else if (added === 0) {
       host.notify({ kind: 'info', message: t('notify.importNone') })
     } else {
       commit(merged)
@@ -1506,6 +1671,34 @@ function ManagerDialog() {
         setView('preview')
       }
       setPendingDel(null)
+      return
+    }
+    // Batch delete: snapshot for the undo toast, then remove all checked ids.
+    if (action.type === 'batch-delete') {
+      const before = list
+      const next = list.filter(s => !checkedIds.has(s.id))
+      if (next.length === list.length) return
+      commit(next)
+      host.notify({
+        kind: 'info',
+        message: `${list.length - next.length} ${t('manage.batchDeleted')}`,
+        durationMs: 8000,
+        action: { label: t('manage.undo'), onClick: () => { commit(before); host.notify({ kind: 'success', message: t('manage.undone') }) } }
+      })
+      setCheckedIds(new Set())
+      setSelectMode(false)
+      setBatchArm(false)
+      return
+    }
+    // Batch enable/disable over the checked ids.
+    if (action.type === 'batch-toggle') {
+      const next = list.map(s => (checkedIds.has(s.id) ? { ...s, enabled: action.enabled !== false } : s))
+      commit(next)
+      setBatchArm(false)
+      return
+    }
+    if (action.type === 'arm-batch-delete') {
+      setBatchArm(true)
       return
     }
     if (action.type === 'arm-delete') {
@@ -1553,15 +1746,7 @@ function ManagerDialog() {
   // the unfiltered list (visual order must equal storage order), so the ⠿
   // handle goes inert while a filter is active.
   const q = search.trim().toLowerCase()
-  const filtered = list.filter(sn => {
-    if (tagFilter && !(sn.tags || []).includes(tagFilter)) return false
-    if (!q) return true
-    return (
-      sn.label.toLowerCase().includes(q) ||
-      (sn.description || '').toLowerCase().includes(q) ||
-      (sn.tags || []).some(tag => tag.toLowerCase().includes(q))
-    )
-  })
+  const filtered = list.filter(sn => matchesFilter(sn, q, tagFilter))
   const dragEnabled = q === '' && tagFilter === null
   const allTags = (() => {
     const seen = new Set()
@@ -1596,7 +1781,7 @@ function ManagerDialog() {
       if (!o) $managerOpen.set(false)
     },
     children: jsx(DialogContent, {
-      className: DIALOG_MAX_W,
+      style: DIALOG_STYLE,
       // Radix auto-focuses the first focusable element = the search input,
       // so the manager opened with a blinking caret in search. Suppress it;
       // the first snippet is selected instead (see the open-time state reset).
@@ -1607,7 +1792,7 @@ function ManagerDialog() {
         // sat flush on the list (the wrapper ate the body gap). The 1fr
         // grid track gives us full remaining height; pin it so the two
         // panes get a definite box to scroll inside.
-        style: { display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0, height: 'min(58vh, 540px)' },
+        style: { display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0, height: 'min(72vh, 700px)' },
         children: [
           jsxs('div', {
             style: { display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flexShrink: 0 },
@@ -1696,38 +1881,110 @@ function ManagerDialog() {
                                 dispatch,
                                 t,
                                 selected: sn.id === selectedId,
-                                canDrag: dragEnabled
+                                canDrag: dragEnabled && !selectMode,
+                                selectMode,
+                                checked: checkedIds.has(sn.id),
+                                onToggleCheck: id =>
+                                  setCheckedIds(prev => {
+                                    const next = new Set(prev)
+                                    if (next.has(id)) next.delete(id)
+                                    else next.add(id)
+                                    return next
+                                  })
                               }, sn.id)
                             )
                   }, 'list'),
                   jsxs('div', {
-                    style: toolbarRowStyle,
+                    // wrap: select-mode bar has 6 controls; 280px pane can't
+                    // hold one row and clipping a Delete button is worse than
+                    // a second line.
+                    style: { ...toolbarRowStyle, flexWrap: 'wrap', rowGap: '6px' },
                     children: [
-                      jsx(Button, {
-                        variant: 'outline',
-                        size: 'sm',
-                        onClick: () => {
-                          setEditing({ id: null, label: '', description: '', text: '', tags: '' })
-                          setView('edit')
-                          setSelectedId(null)
-                        },
-                        children: t('manage.add')
-                      }, 'add'),
-                      jsx(Button, {
-                        variant: 'ghost',
-                        size: 'sm',
-                        onClick: () => {
-                          setImportText('')
-                          setView('import')
-                        },
-                        children: t('manage.import')
-                      }, 'import'),
-                      jsx(Button, {
-                        variant: 'ghost',
-                        size: 'sm',
-                        onClick: exportAll,
-                        children: t('manage.export')
-                      }, 'export')
+                      selectMode
+                        ? [
+                            jsxs('span', { style: { fontSize: '12px', color: 'var(--ui-text-tertiary)', flexShrink: 0 }, children: [checkedIds.size, ' ', t('manage.selectedCount')] }, 'count'),
+                            jsx(Button, {
+                              variant: 'outline',
+                              size: 'sm',
+                              onClick: () => {
+                                const allSelected = filtered.length > 0 && filtered.every(sn => checkedIds.has(sn.id))
+                                setCheckedIds(allSelected ? new Set() : new Set(filtered.map(sn => sn.id)))
+                              },
+                              disabled: filtered.length === 0,
+                              children: t('manage.selectAll')
+                            }, 'all'),
+                            jsx(Button, {
+                              variant: 'ghost',
+                              size: 'sm',
+                              onClick: () => dispatch({ type: 'batch-toggle', enabled: true }),
+                              disabled: checkedIds.size === 0,
+                              children: t('manage.enableSelected')
+                            }, 'enable'),
+                            jsx(Button, {
+                              variant: 'ghost',
+                              size: 'sm',
+                              onClick: () => dispatch({ type: 'batch-toggle', enabled: false }),
+                              disabled: checkedIds.size === 0,
+                              children: t('manage.disableSelected')
+                            }, 'disable'),
+                            jsx(Button, {
+                              variant: 'ghost',
+                              size: 'sm',
+                              style: batchArm ? { color: 'var(--destructive)' } : null,
+                              onClick: () => dispatch({ type: batchArm ? 'batch-delete' : 'arm-batch-delete' }),
+                              disabled: checkedIds.size === 0,
+                              children: batchArm ? t('manage.batchConfirmDel') : t('manage.batchDelete')
+                            }, 'del'),
+                            jsx(Button, {
+                              variant: 'outline',
+                              size: 'sm',
+                              onClick: () => {
+                                setSelectMode(false)
+                                setCheckedIds(new Set())
+                                setBatchArm(false)
+                              },
+                              children: t('manage.cancelSelect')
+                            }, 'cancel')
+                          ]
+                        : [
+                            jsx(Button, {
+                              variant: 'outline',
+                              size: 'sm',
+                              onClick: () => {
+                                setEditing({ id: null, label: '', description: '', text: '', tags: '' })
+                                setView('edit')
+                                setSelectedId(null)
+                              },
+                              children: t('manage.add')
+                            }, 'add'),
+                            jsx(Button, {
+                              variant: 'ghost',
+                              size: 'sm',
+                              onClick: () => {
+                                setSelectMode(true)
+                                setCheckedIds(new Set())
+                                setBatchArm(false)
+                                setPendingDel(null)
+                              },
+                              children: t('manage.select')
+                            }, 'select'),
+                            jsx(Button, {
+                              variant: 'ghost',
+                              size: 'sm',
+                              onClick: () => {
+                                setImportText('')
+                                setImportOverwrite(false)
+                                setView('import')
+                              },
+                              children: t('manage.import')
+                            }, 'import'),
+                            jsx(Button, {
+                              variant: 'ghost',
+                              size: 'sm',
+                              onClick: exportAll,
+                              children: t('manage.export')
+                            }, 'export')
+                          ]
                     ]
                   })
                 ]
@@ -1765,6 +2022,28 @@ function ManagerDialog() {
                       style: paneRightStyle,
                       children: [
                         jsx(DialogDescription, { children: t('manage.importTitle') }, 'h'),
+                        // Mode toggle: merge (default, old behavior) vs
+                        // overwrite. Explains itself — the risk of overwrite
+                        // is in the label, not a hidden surprise.
+                        jsxs('div', {
+                          style: { display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 },
+                          children: [
+                            jsxs('label', {
+                              style: { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px' },
+                              children: [
+                                jsx('input', { type: 'radio', name: `${ID}-import-mode`, checked: !importOverwrite, onChange: () => setImportOverwrite(false) }, 'r1'),
+                                t('manage.importModeMerge')
+                              ]
+                            }, 'm1'),
+                            jsxs('label', {
+                              style: { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px' },
+                              children: [
+                                jsx('input', { type: 'radio', name: `${ID}-import-mode`, checked: importOverwrite, onChange: () => setImportOverwrite(true) }, 'r2'),
+                                t('manage.importModeOverwrite')
+                              ]
+                            }, 'm2')
+                          ]
+                        }, 'mode'),
                         jsx(Textarea, {
                           value: importText,
                           onChange: e => setImportText(e.target.value),
@@ -1783,8 +2062,8 @@ function ManagerDialog() {
                             jsx(Button, {
                               size: 'sm',
                               disabled: importText.trim() === '',
-                              onClick: () => importFrom(importText),
-                              children: t('manage.importMerge')
+                              onClick: () => importFrom(importText, importOverwrite),
+                              children: importOverwrite ? t('manage.importOverwrite') : t('manage.importMerge')
                             }, 'merge')
                           ]
                         })
@@ -1901,6 +2180,12 @@ function ManagerDialog() {
                               jsx(Button, {
                                 variant: 'text',
                                 size: 'sm',
+                                onClick: () => copyTextToClipboard(selected.text, t),
+                                children: t('manage.copy')
+                              }, 'copy'),
+                              jsx(Button, {
+                                variant: 'text',
+                                size: 'sm',
                                 onClick: () => openEdit(selected),
                                 children: t('manage.edit')
                               }, 'edit'),
@@ -1932,7 +2217,7 @@ function ManagerDialog() {
 export default {
   id: 'prompt-snippets',
   name: 'Prompt Snippets',
-  description: 'Prompt snippet library: quick-pick overlay above the composer (own shortcut) + management view with drag reordering, tags, and import/export.',
+  description: 'Prompt snippet library: quick-pick overlay above the composer (ships with Ctrl+S, rebindable) + management view with drag reordering, tags, batch select, and merge/overwrite import/export.',
   register(ctx) {
     store = ctx.storage
     ensureAnchorTracker()
@@ -1986,10 +2271,12 @@ export default {
         }
       })
 
-      // Global keybind (Settings → 键盘快捷键 can rebind it). Default unbound —
-      // binding is one panel click, and a default combo risks colliding with
-      // core composer keys. The palette row surfaces the live combo as its hint.
-      // Opens the Cmd-K-style quick picker: filter + ↑↓ + ↵ insert.
+      // Global keybind (Settings → 键盘快捷键 can rebind it). Ships with ⌃S
+      // (v1.9, user decision): no host action defaults to ctrl+s / mod+s, so
+      // the combo is collision-free — and an explicit user override (stored in
+      // the official keybind store) always beats `defaults` in bindingsFor.
+      // The backup mirror below keeps the user's combo alive across the
+      // startup-wipe bug (hermes-agent#116331).
       // defaults: served from the plugin-storage backup (see syncKeybindBackup)
       // so bindingsFor still resolves the user's combo even after the official
       // keybind store wipes contributed overrides on startup.
@@ -1999,7 +2286,7 @@ export default {
         data: {
           id: 'prompt-snippets.openManager',
           category: 'composer',
-          defaults: [...(keybindBackup || [])],
+          defaults: [...(keybindBackup && keybindBackup.length > 0 ? keybindBackup : ['ctrl+s'])],
           label: ti18n('menu.label'),
           run: () => {
             // React picker (QuickPicker, mounted on our own composer .top
