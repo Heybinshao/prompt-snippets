@@ -1307,13 +1307,17 @@ function QuickPicker() {
     if (c && typeof c.focus === 'function') c.focus(openSid)
   }
 
-  function scrollActive() {
+  function scrollActive(idx) {
     // Official pattern (trigger-popover.tsx): scroll the list itself, never
     // scrollIntoView — it acts on every scrollable ancestor and can shift the
     // layout sideways. `nearest` semantics via rects (offsetParent-agnostic):
     // move only when the row overflows exactly one edge, shortest delta wins.
+    // `idx` must be the NEW active index passed by the keydown handler: the
+    // rAF callback runs after React re-renders, but this closure still holds
+    // the previous render's `active`, which lags the highlight by one row and
+    // leaves the new row sitting just outside the viewport.
     const list = listRef.current
-    const node = list?.children[active]
+    const node = list?.children[idx]
     if (!node || !list) return
     const listRect = list.getBoundingClientRect()
     const rowRect = node.getBoundingClientRect()
@@ -1378,10 +1382,10 @@ function QuickPicker() {
                     if (e.isComposing) return // IME confirm (Chinese input) is not a pick
                     if (e.key === 'ArrowDown') {
                       e.preventDefault()
-                      if (items.length) { setActive(Math.min(active + 1, items.length - 1)); requestAnimationFrame(scrollActive) }
+                      if (items.length) { const next = Math.min(active + 1, items.length - 1); setActive(next); requestAnimationFrame(() => scrollActive(next)) }
                     } else if (e.key === 'ArrowUp') {
                       e.preventDefault()
-                      if (items.length) { setActive(Math.max(active - 1, 0)); requestAnimationFrame(scrollActive) }
+                      if (items.length) { const next = Math.max(active - 1, 0); setActive(next); requestAnimationFrame(() => scrollActive(next)) }
                     } else if (e.key === 'Enter') {
                       e.preventDefault()
                       const sn = items[active]
